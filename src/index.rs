@@ -1,5 +1,6 @@
 pub trait Index<const D: usize> {
-    fn insert(&mut self, point: [f64; D]) -> Vec<usize>;
+    fn insert(&mut self, point: [f64; D]);
+    fn rknn(&self, point: [f64; D]) -> Vec<usize>;
     fn query_range(&self, point_index: usize, range: f64) -> Vec<usize>;
 
     fn core_distance_of(&self, point_index: usize) -> f64;

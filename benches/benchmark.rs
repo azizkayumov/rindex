@@ -7,7 +7,7 @@ fn benchmark(criterion: &mut Criterion) {
     let n = 10000;
     let seed = 0;
 
-    let mut group = criterion.benchmark_group("Insert + RkNN");
+    let mut group = criterion.benchmark_group("rknn");
     group.sample_size(10);
 
     group.bench_function("SSTree", |b| b.iter(|| bench_sstree(k, n, seed)));
@@ -22,15 +22,17 @@ fn bench_sstree(k: usize, n: usize, seed: u64) {
     let mut rng = StdRng::seed_from_u64(seed);
     for _ in 0..n {
         let point = [rng.gen(), rng.gen()];
+        tree.rknn(point);
         tree.insert(point);
     }
 }
 
 fn bench_linear(k: usize, n: usize, seed: u64) {
-    let mut tree = rindex::LinearIndex::new(k);
+    let mut linear = rindex::LinearIndex::new(k);
     let mut rng = StdRng::seed_from_u64(seed);
     for _ in 0..n {
         let point = [rng.gen(), rng.gen()];
-        tree.insert(point);
+        linear.rknn(point);
+        linear.insert(point);
     }
 }

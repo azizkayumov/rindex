@@ -18,7 +18,7 @@ impl<const D: usize> LinearIndex<D> {
         }
     }
 
-    fn add_neighbor(&mut self, a: usize, b: usize) -> bool {
+    fn add_neighbor(&mut self, a: usize, b: usize) {
         let distance = euclidean(&self.data[a], &self.data[b]);
         let core_a = self.core_distance_of(a);
         let core_b = self.core_distance_of(b);
@@ -34,24 +34,29 @@ impl<const D: usize> LinearIndex<D> {
             if self.neighbors[a].len() > self.k {
                 self.neighbors[a].pop();
             }
-            true
-        } else {
-            false
         }
     }
 }
 
 impl<const D: usize> Index<D> for LinearIndex<D> {
-    fn insert(&mut self, point: [f64; D]) -> Vec<usize> {
+    fn insert(&mut self, point: [f64; D]) {
         // Append the point to the data.
         let new_point_index = self.data.len();
         self.data.push(point);
         self.neighbors.push(BinaryHeap::new());
 
         // Find the reverse k-nearest neighbors of the point and update its core distance.
+        for neighbor_idx in 0..self.num_points() {
+            self.add_neighbor(neighbor_idx, new_point_index);
+        }
+    }
+
+    fn rknn(&self, point: [f64; D]) -> Vec<usize> {
+        // Find the reverse k-nearest neighbors of the point and update its core distance.
         let mut rknns = Vec::new();
         for neighbor_idx in 0..self.num_points() {
-            if self.add_neighbor(neighbor_idx, new_point_index) {
+            let dist = euclidean(&self.data[neighbor_idx], &point);
+            if dist < self.core_distance_of(neighbor_idx) {
                 rknns.push(neighbor_idx);
             }
         }
@@ -94,18 +99,15 @@ pub mod tests {
     #[test]
     pub fn test_linear() {
         let mut index = super::LinearIndex::new(3);
-        let rknn = index.insert([0.0, 0.0]);
-        assert_eq!(rknn.len(), 1);
-        assert!(rknn.contains(&0));
+        index.insert([0.0, 0.0]);
 
         for i in 1..100 {
             let point = [0., i as f64];
-
+            let rknns = index.rknn(point);
             // Since points are inserted in order, the reverse k-nearest neighbors should
-            // be the previously inserted point and the new point.
-            let rknns = index.insert(point);
+            // be the previously inserted point.
             assert!(rknns.contains(&(i - 1)));
-            assert!(rknns.contains(&i));
+            index.insert(point);
         }
     }
 }

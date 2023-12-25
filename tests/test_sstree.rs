@@ -12,13 +12,15 @@ pub fn test_random() {
     let n = 1000;
     for i in 0..n {
         let point = [rng.gen(), rng.gen()];
-        let mut tree_rknns = tree.insert(point);
-        let mut linear_rknns = linear.insert(point);
+        let mut tree_rknns = tree.rknn(point);
+        let mut linear_rknns = linear.rknn(point);
 
         tree_rknns.sort();
         linear_rknns.sort();
         assert_eq!(tree_rknns, linear_rknns);
 
+        tree.insert(point);
+        linear.insert(point);
         for j in 0..=i {
             let actual = linear.core_distance_of(j);
             let expected = tree.core_distance_of(j);
