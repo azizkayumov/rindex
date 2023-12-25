@@ -39,11 +39,6 @@ impl<const D: usize> LinearIndex<D> {
             false
         }
     }
-
-    #[must_use]
-    pub fn num_points(&self) -> usize {
-        self.data.len()
-    }
 }
 
 impl<const D: usize> Index<D> for LinearIndex<D> {
@@ -85,6 +80,10 @@ impl<const D: usize> Index<D> for LinearIndex<D> {
             .iter()
             .map(|(_, neighbor_index)| *neighbor_index)
             .collect()
+    }
+
+    fn num_points(&self) -> usize {
+        self.data.len()
     }
 }
 

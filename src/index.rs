@@ -4,4 +4,5 @@ pub trait Index<const D: usize> {
 
     fn core_distance_of(&self, point_index: usize) -> f64;
     fn neighbors_of(&self, point_index: usize) -> Vec<usize>;
+    fn num_points(&self) -> usize;
 }
