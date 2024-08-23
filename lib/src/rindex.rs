@@ -1,3 +1,5 @@
+use ordered_float::OrderedFloat;
+
 use crate::{distance::euclidean, index::Index, node::Node};
 
 pub struct Rindex<const D: usize> {
@@ -60,6 +62,62 @@ impl<const D: usize> Rindex<D> {
         self.nodes[slot_id] = Node::default();
     }
 
+    fn split(&mut self, slot_id: usize) -> usize {
+        // Find the farthest child from the centroid as the sibling seed
+        let mut sibling_seed: usize = self.nodes[slot_id].children[0];
+        let mut max_dist = 0.0;
+        for child in &self.nodes[slot_id].children {
+            let child_sphere = &self.nodes[*child].sphere;
+            let distance = euclidean(&self.nodes[slot_id].sphere.center, &child_sphere.center)
+                + child_sphere.radius;
+            if distance > max_dist {
+                sibling_seed = *child;
+                max_dist = distance;
+            }
+        }
+
+        // Give minimum fanout children to the sibling
+        let mut children = self.nodes[slot_id].children.clone();
+        children.sort_by_key(|child| {
+            let child_sphere = self.nodes[*child].sphere;
+            let distance = euclidean(
+                &self.nodes[sibling_seed].sphere.center,
+                &child_sphere.center,
+            ) + child_sphere.radius;
+            OrderedFloat(distance)
+        });
+        let mut remaining = children.split_off(self.min_fanout);
+
+        // Both nodes should have at least min_fanout children
+        let sibling = self.add_node(Node::internal(children));
+        self.reshape(sibling);
+        self.nodes[slot_id].children = remaining.split_off(remaining.len() - self.min_fanout);
+        self.reshape(slot_id);
+
+        // Distribute the remaining children to whichever node is closer
+        for r in remaining {
+            let dist_sibling = euclidean(
+                &self.nodes[sibling].sphere.center,
+                &self.nodes[r].sphere.center,
+            );
+            let dist_node = euclidean(
+                &self.nodes[slot_id].sphere.center,
+                &self.nodes[r].sphere.center,
+            );
+            if dist_sibling < dist_node {
+                self.nodes[sibling].children.push(r);
+            } else {
+                self.nodes[slot_id].children.push(r);
+            }
+        }
+
+        // Finally, reshape both nodes
+        self.reshape(sibling);
+        self.reshape(slot_id);
+
+        sibling
+    }
+
     #[allow(clippy::similar_names)]
     fn reshape(&mut self, slot_id: usize) {
         // Calculate the centroid, weight and height of the parent
@@ -115,14 +173,10 @@ mod tests {
         let mut rindex = Rindex::default();
 
         // Create some point nodes
-        let point_a = [0.0, 0.0];
-        let point_b = [0.0, 2.0];
-        let point_c = [2.0, 0.0];
-        let point_d = [2.0, 2.0];
-        let node_a = rindex.add_node(Node::point(point_a));
-        let node_b = rindex.add_node(Node::point(point_b));
-        let node_c = rindex.add_node(Node::point(point_c));
-        let node_d = rindex.add_node(Node::point(point_d));
+        let node_a = rindex.add_node(Node::point([0.0, 0.0]));
+        let node_b = rindex.add_node(Node::point([0.0, 2.0]));
+        let node_c = rindex.add_node(Node::point([2.0, 0.0]));
+        let node_d = rindex.add_node(Node::point([2.0, 2.0]));
 
         // Create a parent node
         let mut parent = Node::default();
@@ -144,5 +198,49 @@ mod tests {
         assert_eq!(rindex.nodes[node_b].parent, node_parent);
         assert_eq!(rindex.nodes[node_c].parent, node_parent);
         assert_eq!(rindex.nodes[node_d].parent, node_parent);
+    }
+
+    #[test]
+    fn split() {
+        let fanout = 8;
+        let mut rindex = Rindex::new(fanout).expect("Invalid fanout");
+
+        // Create 9 point nodes, as the fanout of 8 will trigger a split
+        let node_a = rindex.add_node(Node::point([0.0, 0.0]));
+        let node_b = rindex.add_node(Node::point([0.0, 2.0]));
+        let node_c = rindex.add_node(Node::point([1.0, 1.0]));
+        let node_d = rindex.add_node(Node::point([2.0, 0.0]));
+        let node_e = rindex.add_node(Node::point([2.0, 2.0]));
+        let node_w = rindex.add_node(Node::point([10.0, 10.0]));
+        let node_x = rindex.add_node(Node::point([10.0, 12.0]));
+        let node_y = rindex.add_node(Node::point([12.0, 10.0]));
+        let node_z = rindex.add_node(Node::point([12.0, 12.0]));
+        let point_nodes = vec![
+            node_a, node_b, node_c, node_d, node_e, node_w, node_x, node_y, node_z,
+        ];
+        println!("Point nodes: {:?}", point_nodes);
+
+        // Create a parent node
+        let mut node = Node::default();
+        node.children = point_nodes.clone();
+        let node = rindex.add_node(node);
+        rindex.reshape(node);
+
+        // Split the parent node
+        let sibling = rindex.split(node);
+
+        // Check the node's sphere
+        let node = &rindex.nodes[node];
+        assert_eq!(node.sphere.center, [1., 1.]);
+        assert_eq!(node.sphere.radius, 2.0_f64.sqrt());
+        assert_eq!(node.sphere.weight, 5.0);
+        assert_eq!(node.height, 1);
+
+        // Check the sibling's sphere
+        let sibling = &rindex.nodes[sibling];
+        assert_eq!(sibling.sphere.center, [11., 11.]);
+        assert_eq!(sibling.sphere.radius, 2.0_f64.sqrt());
+        assert_eq!(sibling.sphere.weight, 4.0);
+        assert_eq!(sibling.height, 1);
     }
 }

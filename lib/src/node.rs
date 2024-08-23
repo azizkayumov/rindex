@@ -12,19 +12,30 @@ pub struct Node<const D: usize> {
 
 impl<const D: usize> Node<D> {
     #[must_use]
-    pub fn new(slot_id: usize, height: usize, parent: usize, sphere: Sphere<D>) -> Node<D> {
+    pub fn new(
+        slot_id: usize,
+        height: usize,
+        parent: usize,
+        sphere: Sphere<D>,
+        children: Vec<usize>,
+    ) -> Node<D> {
         Node {
             slot_id,
             height,
             parent,
             sphere,
-            children: Vec::new(),
+            children,
         }
     }
 
     #[must_use]
     pub fn point(point: [f64; D]) -> Node<D> {
-        Self::new(usize::MAX, 0, usize::MAX, Sphere::point(point))
+        Self::new(usize::MAX, 0, usize::MAX, Sphere::point(point), Vec::new())
+    }
+
+    #[must_use]
+    pub fn internal(children: Vec<usize>) -> Node<D> {
+        Self::new(usize::MAX, 0, usize::MAX, Sphere::default(), children)
     }
 }
 
