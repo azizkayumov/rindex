@@ -7,3 +7,4 @@ edition = "2021"
 
 [dependencies]
 rindex = { path = "../lib" }
+rand = "0.8"

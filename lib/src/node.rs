@@ -47,6 +47,26 @@ impl<const D: usize> Node<D> {
     pub fn is_point(&self) -> bool {
         self.height == 0
     }
+
+    #[allow(clippy::inherent_to_string)]
+    pub fn to_string(&self) -> String {
+        let children = self
+            .children
+            .iter()
+            .map(std::string::ToString::to_string)
+            .collect::<Vec<String>>()
+            .join("+");
+        format!(
+            "{},{},{},{},{},{},{}\n",
+            self.slot_id,
+            self.height,
+            self.parent,
+            children,
+            self.sphere.radius,
+            self.sphere.center[0],
+            self.sphere.center[1],
+        )
+    }
 }
 
 impl<const D: usize> Default for Node<D> {

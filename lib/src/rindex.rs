@@ -5,6 +5,7 @@ pub struct Rindex<const D: usize> {
     min_fanout: usize,
     max_fanout: usize,
     reinsert_fanout: usize,
+    reinsert_height: usize,
     root: usize,
     nodes: Vec<Node<D>>,
     index: Index,
@@ -20,6 +21,7 @@ impl<const D: usize> Rindex<D> {
             min_fanout: fanout / 2,
             max_fanout: fanout,
             reinsert_fanout: fanout / 3,
+            reinsert_height: 1,
             root: usize::MAX,
             nodes: Vec::new(),
             index: Index::new(),
@@ -40,6 +42,7 @@ impl<const D: usize> Rindex<D> {
 
         // Insert the point node into the tree
         let mut reinsert_list = vec![slot_id];
+        self.reinsert_height = 1;
         self.reinsert_nodes(&mut reinsert_list);
 
         slot_id
@@ -47,6 +50,7 @@ impl<const D: usize> Rindex<D> {
 
     pub fn delete(&mut self, point_id: usize) {
         let mut reinsert_list = self.delete_entry(point_id);
+        self.reinsert_height = 1;
         self.reinsert_nodes(&mut reinsert_list);
     }
 
@@ -69,6 +73,7 @@ impl<const D: usize> Rindex<D> {
         while let Some(entry_id) = reinsert_list.pop() {
             let res = self.insert_entry(self.root, entry_id);
             reinsert_list.extend(res);
+            self.reinsert_height += 1;
         }
         self.adjust_tree();
     }
@@ -82,7 +87,11 @@ impl<const D: usize> Rindex<D> {
 
             let mut to_be_reinserted = Vec::new();
             if self.nodes[node].children.len() > self.max_fanout && node != self.root {
-                to_be_reinserted.push(self.split(node));
+                if self.reinsert_height == self.nodes[node].height && self.reinsert_fanout > 0 {
+                    to_be_reinserted.extend(self.pop_farthest_children(node));
+                } else {
+                    to_be_reinserted.push(self.split(node));
+                }
             }
             to_be_reinserted
         } else {
@@ -142,6 +151,19 @@ impl<const D: usize> Rindex<D> {
             }
         }
         best_child
+    }
+
+    fn pop_farthest_children(&mut self, node: usize) -> Vec<usize> {
+        let mut children = self.nodes[node].children.clone();
+        children.sort_by_key(|child| {
+            let child_sphere = self.nodes[*child].sphere;
+            let dist = euclidean(&self.nodes[node].sphere.center, &child_sphere.center);
+            OrderedFloat(dist + child_sphere.radius)
+        });
+        let to_be_reinserted = children.split_off(children.len() - self.reinsert_fanout);
+        self.nodes[node].children = children;
+        self.reshape(node);
+        to_be_reinserted
     }
 
     fn split(&mut self, slot_id: usize) -> usize {
@@ -253,6 +275,20 @@ impl<const D: usize> Rindex<D> {
         self.index.delete(slot_id);
         self.nodes[slot_id] = Node::default();
     }
+
+    #[must_use]
+    pub fn nodes_to_string_rows(&self) -> Vec<String> {
+        let mut rows = Vec::new();
+        let height = self.height();
+        for h in (0..=height).rev() {
+            for node in &self.nodes {
+                if node.height == h {
+                    rows.push(node.to_string());
+                }
+            }
+        }
+        rows
+    }
 }
 
 impl<const D: usize> Default for Rindex<D> {
@@ -348,6 +384,7 @@ mod tests {
         // The tree should be empty
         assert_eq!(rindex.height(), 0);
 
+        // Insert 8 points to fill the root node
         let mut point_ids = Vec::new();
         for i in 0..fanout {
             let point_id = rindex.insert([i as f64, i as f64]);

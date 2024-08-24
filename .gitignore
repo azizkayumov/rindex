@@ -2,4 +2,3 @@ target
 Cargo.lock
 /demo/data/env
 .DS_Store
-/tests/demo/env
