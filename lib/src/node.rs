@@ -34,8 +34,18 @@ impl<const D: usize> Node<D> {
     }
 
     #[must_use]
+    pub fn leaf() -> Node<D> {
+        Self::new(usize::MAX, 1, usize::MAX, Sphere::default(), Vec::new())
+    }
+
+    #[must_use]
     pub fn internal(children: Vec<usize>) -> Node<D> {
         Self::new(usize::MAX, 0, usize::MAX, Sphere::default(), children)
+    }
+
+    #[must_use]
+    pub fn is_point(&self) -> bool {
+        self.height == 0
     }
 }
 

@@ -1,6 +1,5 @@
-use ordered_float::OrderedFloat;
-
 use crate::{distance::euclidean, index::Index, node::Node};
+use ordered_float::OrderedFloat;
 
 pub struct Rindex<const D: usize> {
     min_fanout: usize,
@@ -28,12 +27,27 @@ impl<const D: usize> Rindex<D> {
     }
 
     #[must_use]
-    pub fn insert(&mut self, _point: [f64; D]) -> usize {
-        todo!("Implement insert");
+    pub fn insert(&mut self, point: [f64; D]) -> usize {
+        // Create the root node if it doesn't exist
+        if self.root == usize::MAX {
+            let node = Node::leaf();
+            self.root = self.add_slot(node);
+        }
+
+        // Create a point node (reuse a slot in the node vector if possible)
+        let point = Node::point(point);
+        let slot_id = self.add_slot(point);
+
+        // Insert the point node into the tree
+        let mut reinsert_list = vec![slot_id];
+        self.reinsert_nodes(&mut reinsert_list);
+
+        slot_id
     }
 
-    pub fn delete(&mut self, _point_id: usize) {
-        todo!("Implement delete");
+    pub fn delete(&mut self, point_id: usize) {
+        let mut reinsert_list = self.delete_entry(point_id);
+        self.reinsert_nodes(&mut reinsert_list);
     }
 
     #[must_use]
@@ -46,20 +60,88 @@ impl<const D: usize> Rindex<D> {
         todo!("Implement query_nearest");
     }
 
-    fn add_node(&mut self, mut node: Node<D>) -> usize {
-        let slot_id = self.index.insert();
-        node.slot_id = slot_id;
-        if slot_id == self.nodes.len() {
-            self.nodes.push(node);
-        } else {
-            self.nodes[slot_id] = node;
-        }
-        slot_id
+    #[must_use]
+    pub fn height(&self) -> usize {
+        self.nodes.get(self.root).map_or(0, |node| node.height)
     }
 
-    fn delete_node(&mut self, slot_id: usize) {
-        self.index.delete(slot_id);
-        self.nodes[slot_id] = Node::default();
+    fn reinsert_nodes(&mut self, reinsert_list: &mut Vec<usize>) {
+        while let Some(entry_id) = reinsert_list.pop() {
+            let res = self.insert_entry(self.root, entry_id);
+            reinsert_list.extend(res);
+        }
+        self.adjust_tree();
+    }
+
+    // Insert a node into the tree
+    // Split the node if it has too many children
+    fn insert_entry(&mut self, node: usize, entry: usize) -> Vec<usize> {
+        if self.nodes[node].height == self.nodes[entry].height + 1 {
+            self.nodes[node].children.push(entry);
+            self.reshape(node);
+
+            let mut to_be_reinserted = Vec::new();
+            if self.nodes[node].children.len() > self.max_fanout && node != self.root {
+                to_be_reinserted.push(self.split(node));
+            }
+            to_be_reinserted
+        } else {
+            let best_child = self.choose_subtree(node, entry);
+            let result = self.insert_entry(best_child, entry);
+            self.reshape(node);
+            result
+        }
+    }
+
+    fn delete_entry(&mut self, entry: usize) -> Vec<usize> {
+        let mut current = self.nodes[entry].parent;
+        self.nodes[current].children.retain(|&x| x != entry);
+        self.delete_slot(entry);
+
+        let mut reinsert_list = Vec::new();
+        while current != usize::MAX {
+            self.reshape(current);
+            let parent = self.nodes[current].parent;
+            if current != self.root && self.nodes[current].children.len() < self.min_fanout {
+                self.nodes[parent].children.retain(|&x| x != current);
+                reinsert_list.extend(self.nodes[current].children.clone());
+                self.delete_slot(current);
+            }
+            current = parent;
+        }
+        reinsert_list
+    }
+
+    fn adjust_tree(&mut self) {
+        self.reshape(self.root);
+        if self.nodes[self.root].children.len() > self.max_fanout {
+            let sibling = self.split(self.root);
+            let new_root = Node::internal(vec![self.root, sibling]);
+            self.root = self.add_slot(new_root);
+            self.reshape(self.root);
+        } else if self.nodes[self.root].height > 1 && self.nodes[self.root].children.len() == 1 {
+            let new_root = self.nodes[self.root].children[0];
+            self.delete_slot(self.root);
+            self.root = new_root;
+            self.nodes[self.root].parent = usize::MAX;
+        } else if self.nodes[self.root].children.is_empty() {
+            self.delete_slot(self.root);
+            self.root = usize::MAX;
+        }
+    }
+
+    fn choose_subtree(&self, node: usize, entry: usize) -> usize {
+        let mut best_distance = f64::INFINITY;
+        let mut best_child = usize::MAX;
+        for &child_id in &self.nodes[node].children {
+            let child = &self.nodes[child_id];
+            let distance = euclidean(&child.sphere.center, &self.nodes[entry].sphere.center);
+            if distance < best_distance {
+                best_distance = distance;
+                best_child = child_id;
+            }
+        }
+        best_child
     }
 
     fn split(&mut self, slot_id: usize) -> usize {
@@ -89,7 +171,7 @@ impl<const D: usize> Rindex<D> {
         let mut remaining = children.split_off(self.min_fanout);
 
         // Both nodes should have at least min_fanout children
-        let sibling = self.add_node(Node::internal(children));
+        let sibling = self.add_slot(Node::internal(children));
         self.reshape(sibling);
         self.nodes[slot_id].children = remaining.split_off(remaining.len() - self.min_fanout);
         self.reshape(slot_id);
@@ -155,6 +237,22 @@ impl<const D: usize> Rindex<D> {
             self.nodes[child_id].parent = slot_id;
         }
     }
+
+    fn add_slot(&mut self, mut node: Node<D>) -> usize {
+        let slot_id = self.index.insert();
+        node.slot_id = slot_id;
+        if slot_id == self.nodes.len() {
+            self.nodes.push(node);
+        } else {
+            self.nodes[slot_id] = node;
+        }
+        slot_id
+    }
+
+    fn delete_slot(&mut self, slot_id: usize) {
+        self.index.delete(slot_id);
+        self.nodes[slot_id] = Node::default();
+    }
 }
 
 impl<const D: usize> Default for Rindex<D> {
@@ -173,15 +271,15 @@ mod tests {
         let mut rindex = Rindex::default();
 
         // Create some point nodes
-        let node_a = rindex.add_node(Node::point([0.0, 0.0]));
-        let node_b = rindex.add_node(Node::point([0.0, 2.0]));
-        let node_c = rindex.add_node(Node::point([2.0, 0.0]));
-        let node_d = rindex.add_node(Node::point([2.0, 2.0]));
+        let node_a = rindex.add_slot(Node::point([0.0, 0.0]));
+        let node_b = rindex.add_slot(Node::point([0.0, 2.0]));
+        let node_c = rindex.add_slot(Node::point([2.0, 0.0]));
+        let node_d = rindex.add_slot(Node::point([2.0, 2.0]));
 
         // Create a parent node
         let mut parent = Node::default();
         parent.children = vec![node_a, node_b, node_c, node_d];
-        let node_parent = rindex.add_node(parent);
+        let node_parent = rindex.add_slot(parent);
 
         // Reshape the parent node
         rindex.reshape(node_parent);
@@ -206,24 +304,23 @@ mod tests {
         let mut rindex = Rindex::new(fanout).expect("Invalid fanout");
 
         // Create 9 point nodes, as the fanout of 8 will trigger a split
-        let node_a = rindex.add_node(Node::point([0.0, 0.0]));
-        let node_b = rindex.add_node(Node::point([0.0, 2.0]));
-        let node_c = rindex.add_node(Node::point([1.0, 1.0]));
-        let node_d = rindex.add_node(Node::point([2.0, 0.0]));
-        let node_e = rindex.add_node(Node::point([2.0, 2.0]));
-        let node_w = rindex.add_node(Node::point([10.0, 10.0]));
-        let node_x = rindex.add_node(Node::point([10.0, 12.0]));
-        let node_y = rindex.add_node(Node::point([12.0, 10.0]));
-        let node_z = rindex.add_node(Node::point([12.0, 12.0]));
+        let node_a = rindex.add_slot(Node::point([0.0, 0.0]));
+        let node_b = rindex.add_slot(Node::point([0.0, 2.0]));
+        let node_c = rindex.add_slot(Node::point([1.0, 1.0]));
+        let node_d = rindex.add_slot(Node::point([2.0, 0.0]));
+        let node_e = rindex.add_slot(Node::point([2.0, 2.0]));
+        let node_w = rindex.add_slot(Node::point([10.0, 10.0]));
+        let node_x = rindex.add_slot(Node::point([10.0, 12.0]));
+        let node_y = rindex.add_slot(Node::point([12.0, 10.0]));
+        let node_z = rindex.add_slot(Node::point([12.0, 12.0]));
         let point_nodes = vec![
             node_a, node_b, node_c, node_d, node_e, node_w, node_x, node_y, node_z,
         ];
-        println!("Point nodes: {:?}", point_nodes);
 
         // Create a parent node
         let mut node = Node::default();
         node.children = point_nodes.clone();
-        let node = rindex.add_node(node);
+        let node = rindex.add_slot(node);
         rindex.reshape(node);
 
         // Split the parent node
@@ -242,5 +339,43 @@ mod tests {
         assert_eq!(sibling.sphere.radius, 2.0_f64.sqrt());
         assert_eq!(sibling.sphere.weight, 4.0);
         assert_eq!(sibling.height, 1);
+    }
+
+    #[test]
+    fn update() {
+        let fanout = 8;
+        let mut rindex = Rindex::new(fanout).expect("Invalid fanout");
+        // The tree should be empty
+        assert_eq!(rindex.height(), 0);
+
+        let mut point_ids = Vec::new();
+        for i in 0..fanout {
+            let point_id = rindex.insert([i as f64, i as f64]);
+            point_ids.push(point_id);
+        }
+
+        // The tree should be of height 1 since
+        // the number of points is equal to the fanout
+        assert_eq!(rindex.height(), 1);
+
+        // Insert one more point to trigger a split (so the tree grows in height)
+        let last_inserted = rindex.insert([fanout as f64, fanout as f64]);
+        point_ids.push(last_inserted);
+        assert_eq!(rindex.height(), 2);
+
+        // Delete two points to trigger a merge (so the tree shrinks in height)
+        rindex.delete(point_ids.pop().unwrap());
+        rindex.delete(point_ids.pop().unwrap());
+
+        // The tree should be of height 1 again
+        assert_eq!(rindex.height(), 1);
+
+        // Delete all remaining points
+        for point_id in point_ids {
+            rindex.delete(point_id);
+        }
+
+        // The tree should be empty again
+        assert_eq!(rindex.height(), 0);
     }
 }
