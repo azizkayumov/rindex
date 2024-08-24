@@ -48,6 +48,11 @@ impl<const D: usize> Node<D> {
         self.height == 0
     }
 
+    #[must_use]
+    pub fn is_leaf(&self) -> bool {
+        self.height == 1
+    }
+
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         let children = self

@@ -1,3 +1,5 @@
+use std::{collections::BinaryHeap, vec};
+
 use crate::{distance::euclidean, index::Index, node::Node};
 use ordered_float::OrderedFloat;
 
@@ -55,13 +57,55 @@ impl<const D: usize> Rindex<D> {
     }
 
     #[must_use]
-    pub fn query(&self, _point: [f64; D], _radius: f64) -> Vec<usize> {
-        todo!("Implement query");
+    pub fn query(&self, point: [f64; D], radius: f64) -> Vec<usize> {
+        let mut result = Vec::new();
+        let mut queue = vec![self.root];
+        while let Some(node_id) = queue.pop() {
+            let node = &self.nodes[node_id];
+            if node.is_point() {
+                result.push(node_id);
+                continue;
+            }
+            for &child_id in &node.children {
+                let child = &self.nodes[child_id];
+                let distance =
+                    (euclidean(&child.sphere.center, &point) - child.sphere.radius).max(0.0);
+                if distance <= radius {
+                    queue.push(child_id);
+                }
+            }
+        }
+        result
     }
 
     #[must_use]
-    pub fn query_neighbors(&self, _point: [f64; D], _k: usize) -> Vec<usize> {
-        todo!("Implement query_nearest");
+    pub fn query_neighbors(&self, point: [f64; D], k: usize) -> Vec<usize> {
+        let mut result = BinaryHeap::from(vec![(OrderedFloat(f64::INFINITY), usize::MAX); k]);
+        let mut queue = BinaryHeap::from(vec![(OrderedFloat(0.0), self.root)]);
+
+        while let Some((distance, node_id)) = queue.pop() {
+            let node = &self.nodes[node_id];
+            let current_kth = result.peek().unwrap_or(&(OrderedFloat(f64::INFINITY), 0)).0;
+            if distance >= current_kth {
+                continue;
+            }
+            if node.is_point() {
+                result.push((distance, node_id));
+                result.pop();
+                continue;
+            }
+            for &child_id in &node.children {
+                let child = &self.nodes[child_id];
+                let distance =
+                    (euclidean(&child.sphere.center, &point) - child.sphere.radius).max(0.0);
+                queue.push((OrderedFloat(distance), child_id));
+            }
+        }
+        result
+            .into_sorted_vec()
+            .into_iter()
+            .map(|(_, id)| id)
+            .collect()
     }
 
     #[must_use]
@@ -313,7 +357,7 @@ mod tests {
         let node_d = rindex.add_slot(Node::point([2.0, 2.0]));
 
         // Create a parent node
-        let mut parent = Node::default();
+        let mut parent = Node::leaf();
         parent.children = vec![node_a, node_b, node_c, node_d];
         let node_parent = rindex.add_slot(parent);
 
@@ -414,5 +458,28 @@ mod tests {
 
         // The tree should be empty again
         assert_eq!(rindex.height(), 0);
+    }
+
+    #[test]
+    fn query() {
+        let mut rindex = Rindex::default();
+
+        // Insert some points
+        let mut point_ids = Vec::new();
+        for i in 0..100 {
+            let point_id = rindex.insert([i as f64, i as f64]);
+            point_ids.push(point_id);
+        }
+
+        // Query the tree at the center with a radius of 3
+        let query_point = [50.0, 50.0];
+        let mut range_query_result = rindex.query(query_point, 3.0);
+        range_query_result.sort();
+        assert_eq!(point_ids[48..53], range_query_result);
+
+        // Query the tree for the nearest neighbors
+        let mut knn_query_result = rindex.query_neighbors(query_point, 5);
+        knn_query_result.sort();
+        assert_eq!(point_ids[48..53], knn_query_result);
     }
 }
