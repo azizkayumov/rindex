@@ -3,6 +3,7 @@ pub struct Sphere<const D: usize> {
     pub center: [f64; D],
     pub radius: f64,
     pub weight: f64,
+    pub variance: [f64; D],
 }
 
 impl<const D: usize> Sphere<D> {
@@ -11,6 +12,7 @@ impl<const D: usize> Sphere<D> {
             center,
             radius,
             weight,
+            variance: [0.0; D],
         }
     }
 
@@ -25,6 +27,7 @@ impl<const D: usize> Default for Sphere<D> {
             center: [0.0; D],
             radius: 0.0,
             weight: 0.0,
+            variance: [0.0; D],
         }
     }
 }

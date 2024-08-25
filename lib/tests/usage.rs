@@ -12,7 +12,7 @@ fn basic_usage() {
 
     // Query the tree for nearest neighbors of the query point
     let query_point = [0.0, 0.0];
-    let result = rindex.query_neighbors(query_point, 3);
+    let result = rindex.query_neighbors(&query_point, 3);
 
     // The result should contain the points a, b, and c
     assert_eq!(result.len(), 3);
@@ -24,7 +24,7 @@ fn basic_usage() {
     rindex.delete(c);
 
     // Query the tree again (c should not be in the result)
-    let result = rindex.query_neighbors(query_point, 3);
+    let result = rindex.query_neighbors(&query_point, 3);
     assert_eq!(result.len(), 3);
     assert!(result.contains(&a));
     assert!(result.contains(&b));

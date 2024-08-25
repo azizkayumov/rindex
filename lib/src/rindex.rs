@@ -1,6 +1,6 @@
 use std::{collections::BinaryHeap, vec};
 
-use crate::{distance::euclidean, index::Index, node::Node};
+use crate::{distance::euclidean, index::Index, node::Node, sphere::Sphere};
 use ordered_float::OrderedFloat;
 
 pub struct Rindex<const D: usize> {
@@ -79,33 +79,56 @@ impl<const D: usize> Rindex<D> {
     }
 
     #[must_use]
-    pub fn query_neighbors(&self, point: [f64; D], k: usize) -> Vec<usize> {
+    pub fn query_neighbors(&self, point: &[f64; D], k: usize) -> Vec<usize> {
         let mut result = BinaryHeap::from(vec![(OrderedFloat(f64::INFINITY), usize::MAX); k]);
-        let mut queue = BinaryHeap::from(vec![(OrderedFloat(0.0), self.root)]);
+        self.query_recursive(self.root, point, &mut result);
+        result.into_iter().map(|(_, node_id)| node_id).collect()
+    }
 
-        while let Some((distance, node_id)) = queue.pop() {
-            let node = &self.nodes[node_id];
-            let current_kth = result.peek().unwrap_or(&(OrderedFloat(f64::INFINITY), 0)).0;
-            if distance >= current_kth {
-                continue;
+    fn query_recursive(
+        &self,
+        node: usize,
+        point: &[f64; D],
+        neighbors: &mut BinaryHeap<(OrderedFloat<f64>, usize)>,
+    ) {
+        let node = &self.nodes[node];
+        if node.is_leaf() {
+            for child in &node.children {
+                let child = &self.nodes[*child];
+                let distance = euclidean(&child.sphere.center, point);
+                let current_kth = neighbors
+                    .peek()
+                    .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
+                    .0;
+                if distance < current_kth.0 {
+                    neighbors.push((OrderedFloat(distance), child.slot_id));
+                    neighbors.pop();
+                }
             }
-            if node.is_point() {
-                result.push((distance, node_id));
-                result.pop();
-                continue;
-            }
-            for &child_id in &node.children {
-                let child = &self.nodes[child_id];
-                let distance =
-                    (euclidean(&child.sphere.center, &point) - child.sphere.radius).max(0.0);
-                queue.push((OrderedFloat(distance), child_id));
+        } else {
+            let mut children = node
+                .children
+                .iter()
+                .map(|&child_id| {
+                    let child = &self.nodes[child_id];
+                    let center_distance = euclidean(&child.sphere.center, point);
+                    let distance = (center_distance - child.sphere.radius).max(0.0);
+                    (OrderedFloat(distance), child_id)
+                })
+                .collect::<Vec<_>>();
+            children.sort_by_key(|x| x.0);
+
+            for (distance, child_id) in children {
+                let current_kth = neighbors
+                    .peek()
+                    .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
+                    .0;
+                if distance >= current_kth {
+                    break;
+                }
+                self.query_recursive(child_id, point, neighbors);
             }
         }
-        result
-            .into_sorted_vec()
-            .into_iter()
-            .map(|(_, id)| id)
-            .collect()
     }
 
     #[must_use]
@@ -211,92 +234,134 @@ impl<const D: usize> Rindex<D> {
     }
 
     fn split(&mut self, slot_id: usize) -> usize {
-        // Find the farthest child from the centroid as the sibling seed
-        let mut sibling_seed: usize = self.nodes[slot_id].children[0];
-        let mut max_dist = 0.0;
-        for child in &self.nodes[slot_id].children {
-            let child_sphere = &self.nodes[*child].sphere;
-            let distance = euclidean(&self.nodes[slot_id].sphere.center, &child_sphere.center)
-                + child_sphere.radius;
-            if distance > max_dist {
-                sibling_seed = *child;
-                max_dist = distance;
-            }
-        }
+        // Find the split dimension
+        let split_dimension = self.split_dimension(slot_id);
 
-        // Give minimum fanout children to the sibling
-        let mut children = self.nodes[slot_id].children.clone();
-        children.sort_by_key(|child| {
-            let child_sphere = self.nodes[*child].sphere;
-            let distance = euclidean(
-                &self.nodes[sibling_seed].sphere.center,
-                &child_sphere.center,
-            ) + child_sphere.radius;
-            OrderedFloat(distance)
+        // Sort the children along the split dimension
+        let mut left = self.nodes[slot_id].children.clone();
+        left.sort_by(|a, b| {
+            let a = &self.nodes[*a].sphere.center[split_dimension];
+            let b = &self.nodes[*b].sphere.center[split_dimension];
+            a.partial_cmp(b).unwrap()
         });
-        let mut remaining = children.split_off(self.min_fanout);
 
-        // Both nodes should have at least min_fanout children
-        let sibling = self.add_slot(Node::internal(children));
-        self.reshape(sibling);
-        self.nodes[slot_id].children = remaining.split_off(remaining.len() - self.min_fanout);
+        // Split the children into two groups
+        let mut right = left.split_off(self.min_fanout);
+        right.reverse();
+        let mut remaining = right.split_off(self.min_fanout);
+
+        assert_eq!(left.len(), self.min_fanout);
+        assert_eq!(right.len(), self.min_fanout);
+
+        let left_sphere = self.calculate_sphere(&left);
+        let right_sphere = self.calculate_sphere(&right);
+        let left_dist = euclidean(&left_sphere.center, &self.nodes[slot_id].sphere.center);
+        let right_dist = euclidean(&right_sphere.center, &self.nodes[slot_id].sphere.center);
+
+        if right_dist < left_dist {
+            std::mem::swap(&mut left, &mut right);
+        }
+
+        // Create two new nodes
+        self.nodes[slot_id].children = left;
         self.reshape(slot_id);
 
-        // Distribute the remaining children to whichever node is closer
-        for r in remaining {
-            let dist_sibling = euclidean(
-                &self.nodes[sibling].sphere.center,
-                &self.nodes[r].sphere.center,
-            );
-            let dist_node = euclidean(
+        let sibling = Node::internal(right);
+        let sibling = self.add_slot(sibling);
+        self.reshape(sibling);
+
+        // Reinsert the remaining children
+        while let Some(entry) = remaining.pop() {
+            let node_dist = euclidean(
+                &self.nodes[entry].sphere.center,
                 &self.nodes[slot_id].sphere.center,
-                &self.nodes[r].sphere.center,
             );
-            if dist_sibling < dist_node {
-                self.nodes[sibling].children.push(r);
+            let sibling_dist = euclidean(
+                &self.nodes[entry].sphere.center,
+                &self.nodes[sibling].sphere.center,
+            );
+            if node_dist < sibling_dist {
+                self.nodes[slot_id].children.push(entry);
             } else {
-                self.nodes[slot_id].children.push(r);
+                self.nodes[sibling].children.push(entry);
             }
         }
 
-        // Finally, reshape both nodes
-        self.reshape(sibling);
+        // Finalize the split
         self.reshape(slot_id);
+        self.reshape(sibling);
 
         sibling
     }
 
-    #[allow(clippy::similar_names)]
-    fn reshape(&mut self, slot_id: usize) {
-        // Calculate the centroid, weight and height of the parent
+    fn split_dimension(&self, slot_id: usize) -> usize {
+        // Calculate the variance at each dimension
+        let variance = self.calculate_variance(slot_id);
+
+        // Find the dimension with the maximum variance
+        variance
+            .iter()
+            .enumerate()
+            .max_by_key(|(_, &variance)| OrderedFloat(variance))
+            .map_or(0, |(i, _)| i)
+    }
+
+    fn calculate_variance(&self, slot_id: usize) -> [f64; D] {
+        let node = &self.nodes[slot_id];
+        let mean = &node.sphere.center;
+        let mut variance = [0.0; D];
+        for child_id in &node.children {
+            let child = &self.nodes[*child_id].sphere;
+            for (i, x) in child.center.iter().enumerate() {
+                variance[i] += (x - mean[i]).powi(2) * child.weight;
+                variance[i] += child.variance[i];
+            }
+        }
+        for x in &mut variance {
+            *x /= node.sphere.weight;
+        }
+        variance
+    }
+
+    fn calculate_sphere(&self, children: &[usize]) -> Sphere<D> {
+        // Calculate the centroid
         let mut centroid = [0.0; D];
         let mut weight = 0.0;
-        let mut height = 0;
-        for child_id in &self.nodes[slot_id].children {
-            let child = &self.nodes[*child_id].sphere;
+        for child_id in children {
+            let child = self.nodes[*child_id].sphere;
             for (i, x) in child.center.iter().enumerate() {
                 centroid[i] += x * child.weight;
             }
             weight += child.weight;
-            height = height.max(self.nodes[*child_id].height);
         }
         for x in &mut centroid {
             *x /= weight;
         }
 
-        // Calculate the radius of the new sphere
+        // Calculate the radius
         let mut radius: f64 = 0.0;
-        for child_id in &self.nodes[slot_id].children {
+        for child_id in children {
             let child = &self.nodes[*child_id].sphere;
             let distance = euclidean(&centroid, &child.center);
             radius = radius.max(distance + child.radius);
         }
 
-        // Update the sphere & height of the parent
-        self.nodes[slot_id].sphere.center = centroid;
-        self.nodes[slot_id].sphere.radius = radius;
-        self.nodes[slot_id].sphere.weight = weight;
-        self.nodes[slot_id].height = height + 1;
+        Sphere::new(centroid, radius, weight)
+    }
+
+    #[allow(clippy::similar_names)]
+    fn reshape(&mut self, slot_id: usize) {
+        // Calculate the sphere
+        let mut sphere = self.calculate_sphere(&self.nodes[slot_id].children);
+        sphere.variance = self.calculate_variance(slot_id);
+        self.nodes[slot_id].sphere = sphere;
+
+        // Calculate the height
+        self.nodes[slot_id].height = self.nodes[slot_id]
+            .children
+            .iter()
+            .fold(0, |max, child_id| max.max(self.nodes[*child_id].height))
+            + 1;
 
         // Update parent of the children
         for child_id in self.nodes[slot_id].children.clone() {
@@ -337,7 +402,7 @@ impl<const D: usize> Rindex<D> {
 
 impl<const D: usize> Default for Rindex<D> {
     fn default() -> Self {
-        Rindex::new(10).expect("Invalid fanout")
+        Rindex::new(6).expect("Invalid fanout")
     }
 }
 
@@ -391,19 +456,23 @@ mod tests {
         let node_c = rindex.add_slot(Node::point([1.0, 1.0]));
         let node_d = rindex.add_slot(Node::point([2.0, 0.0]));
         let node_e = rindex.add_slot(Node::point([2.0, 2.0]));
-        let node_w = rindex.add_slot(Node::point([10.0, 10.0]));
-        let node_x = rindex.add_slot(Node::point([10.0, 12.0]));
-        let node_y = rindex.add_slot(Node::point([12.0, 10.0]));
-        let node_z = rindex.add_slot(Node::point([12.0, 12.0]));
+        let node_w = rindex.add_slot(Node::point([10.0, 1.0]));
+        let node_x = rindex.add_slot(Node::point([10.0, 2.0]));
+        let node_y = rindex.add_slot(Node::point([11.0, 1.0]));
+        let node_z = rindex.add_slot(Node::point([11.0, 2.0]));
         let point_nodes = vec![
             node_a, node_b, node_c, node_d, node_e, node_w, node_x, node_y, node_z,
         ];
 
-        // Create a parent node
+        // Create a node
         let mut node = Node::default();
         node.children = point_nodes.clone();
         let node = rindex.add_slot(node);
         rindex.reshape(node);
+
+        // Check the split dimension
+        let dimension = rindex.split_dimension(node);
+        assert_eq!(dimension, 0);
 
         // Split the parent node
         let sibling = rindex.split(node);
@@ -413,14 +482,15 @@ mod tests {
         assert_eq!(node.sphere.center, [1., 1.]);
         assert_eq!(node.sphere.radius, 2.0_f64.sqrt());
         assert_eq!(node.sphere.weight, 5.0);
-        assert_eq!(node.height, 1);
 
         // Check the sibling's sphere
         let sibling = &rindex.nodes[sibling];
-        assert_eq!(sibling.sphere.center, [11., 11.]);
-        assert_eq!(sibling.sphere.radius, 2.0_f64.sqrt());
+        assert_eq!(sibling.sphere.center, [10.5, 1.5]);
+        assert_eq!(
+            sibling.sphere.radius,
+            (0.5_f64.powi(2) + 0.5_f64.powi(2)).sqrt()
+        );
         assert_eq!(sibling.sphere.weight, 4.0);
-        assert_eq!(sibling.height, 1);
     }
 
     #[test]
@@ -493,7 +563,7 @@ mod tests {
         assert_eq!(expected, range_query_result);
 
         // Query the tree for k nearest neighbors of the query point
-        let mut knn_query_result = rindex.query_neighbors(query_point, range_query_result.len());
+        let mut knn_query_result = rindex.query_neighbors(&query_point, range_query_result.len());
         knn_query_result.sort();
 
         // The results of the range query and the kNN query should be the same

@@ -49,7 +49,7 @@ fn test_random() {
         assert_eq!(expected, actual);
 
         // Compute the actual results using the k nearest neighbors query
-        let mut actual = rindex.query_neighbors(query_point, expected.len());
+        let mut actual = rindex.query_neighbors(&query_point, expected.len());
         actual.sort();
         assert_eq!(expected, actual);
     }

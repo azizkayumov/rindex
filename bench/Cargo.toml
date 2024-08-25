@@ -1,0 +1,16 @@
+[package]
+name = "bench"
+version = "0.1.0"
+edition = "2021"
+authors = ["Kayumov A.I. <kayumovabduaziz@gmail.com>"]
+
+[dev-dependencies]
+rindex = { path = "../lib" }
+rand = "0.8.5"
+rstar = "0.12.0"
+ordered-float = "3.4.0"
+criterion = "0.5.1"
+
+[[bench]]
+name = "main"
+harness = false
