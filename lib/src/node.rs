@@ -1,5 +1,3 @@
-use std::usize;
-
 use crate::sphere::Sphere;
 
 pub struct Node<const D: usize> {
