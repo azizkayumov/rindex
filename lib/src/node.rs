@@ -53,6 +53,11 @@ impl<const D: usize> Node<D> {
         self.height == 1
     }
 
+    #[must_use]
+    pub fn is_deleted(&self) -> bool {
+        self.slot_id == usize::MAX
+    }
+
     #[allow(clippy::inherent_to_string)]
     pub fn to_string(&self) -> String {
         let children = self

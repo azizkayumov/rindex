@@ -343,8 +343,10 @@ impl<const D: usize> Default for Rindex<D> {
 
 #[cfg(test)]
 mod tests {
+    use rand::{rngs::StdRng, Rng, SeedableRng};
+
     use super::Rindex;
-    use crate::node::Node;
+    use crate::{distance::euclidean, node::Node};
 
     #[test]
     fn reshape() {
@@ -471,15 +473,61 @@ mod tests {
             point_ids.push(point_id);
         }
 
-        // Query the tree at the center with a radius of 3
+        // Set the query point to the center of the data layout
         let query_point = [50.0, 50.0];
-        let mut range_query_result = rindex.query(query_point, 3.0);
-        range_query_result.sort();
-        assert_eq!(point_ids[48..53], range_query_result);
+        let query_radius = 5.0;
 
-        // Query the tree for the nearest neighbors
-        let mut knn_query_result = rindex.query_neighbors(query_point, 5);
+        // Find the expected points within the radius
+        let mut expected = Vec::new();
+        for p in point_ids {
+            let point = rindex.nodes[p].sphere.center;
+            let distance = euclidean(&point, &query_point);
+            if distance <= query_radius {
+                expected.push(p);
+            }
+        }
+
+        // Query the tree for the points within the radius
+        let mut range_query_result = rindex.query(query_point, query_radius);
+        range_query_result.sort();
+        assert_eq!(expected, range_query_result);
+
+        // Query the tree for k nearest neighbors of the query point
+        let mut knn_query_result = rindex.query_neighbors(query_point, range_query_result.len());
         knn_query_result.sort();
-        assert_eq!(point_ids[48..53], knn_query_result);
+
+        // The results of the range query and the kNN query should be the same
+        assert_eq!(expected, knn_query_result);
+    }
+
+    #[test]
+    fn verify_fanout_params() {
+        let mut rindex = Rindex::default();
+        let n = 1000;
+        let mut rng = StdRng::seed_from_u64(0);
+        let deletion_probability = 0.2;
+
+        // Perform a random sequence of insertions and deletions
+        let mut point_ids = Vec::new();
+        for _ in 0..n {
+            let should_delete = rng.gen_bool(deletion_probability);
+            if should_delete && !point_ids.is_empty() {
+                let random_index = rng.gen_range(0..point_ids.len());
+                let point_id = point_ids.swap_remove(random_index);
+                rindex.delete(point_id);
+            } else {
+                let point = [rng.gen_range(0.0..100.0), rng.gen_range(0.0..100.0)];
+                let point_id = rindex.insert(point);
+                point_ids.push(point_id);
+            }
+
+            // Check the fanout constraints after each operation
+            for node in &rindex.nodes {
+                if !node.is_point() && node.slot_id != rindex.root && !node.is_deleted() {
+                    assert!(node.children.len() >= rindex.min_fanout);
+                    assert!(node.children.len() <= rindex.max_fanout);
+                }
+            }
+        }
     }
 }
