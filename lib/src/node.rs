@@ -51,6 +51,7 @@ impl<const D: usize> Node<D> {
         self.sphere.max_distance(point)
     }
 
+    #[allow(dead_code)]
     #[must_use]
     pub fn is_point(&self) -> bool {
         self.height == 0

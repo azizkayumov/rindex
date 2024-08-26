@@ -61,7 +61,7 @@ fn query_rindex() {
         for i in 0..DIMENSION {
             query[i] = rng.gen_range(-100.0..100.0);
         }
-        let result = rindex.query_neighbors(&query, K);
+        let (result, _) = rindex.query_neighbors(&query, K);
         assert_eq!(result.len(), K);
     }
 }

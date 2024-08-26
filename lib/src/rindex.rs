@@ -57,31 +57,53 @@ impl<const D: usize> Rindex<D> {
     }
 
     #[must_use]
-    pub fn query(&self, point: &[f64; D], radius: f64) -> Vec<usize> {
+    pub fn query(&self, point: &[f64; D], radius: f64) -> (Vec<usize>, Vec<f64>) {
         let mut result = Vec::new();
         let mut queue = vec![self.root];
         while let Some(node_id) = queue.pop() {
             let node = &self.nodes[node_id];
-            if node.is_point() {
-                result.push(node_id);
-                continue;
-            }
-            for &child_id in &node.children {
-                let child = &self.nodes[child_id];
-                let distance = child.sphere.min_distance(point);
-                if distance <= radius {
-                    queue.push(child_id);
+            if node.is_leaf() {
+                for &child_id in &node.children {
+                    let child = &self.nodes[child_id];
+                    let distance = child.sphere.min_distance(point);
+                    if distance <= radius {
+                        result.push((child_id, distance));
+                    }
+                }
+            } else {
+                for &child_id in &node.children {
+                    let child = &self.nodes[child_id];
+                    let distance = child.sphere.min_distance(point);
+                    if distance <= radius {
+                        queue.push(child_id);
+                    }
                 }
             }
         }
-        result
+        result.sort_by_key(|(_, dist)| OrderedFloat(*dist));
+        let indices = result.iter().map(|(id, _)| *id).collect();
+        let distances = result.iter().map(|(_, dist)| *dist).collect();
+        (indices, distances)
     }
 
     #[must_use]
-    pub fn query_neighbors(&self, point: &[f64; D], k: usize) -> Vec<usize> {
+    pub fn query_neighbors(&self, point: &[f64; D], k: usize) -> (Vec<usize>, Vec<f64>) {
+        if k == 0 {
+            return (Vec::new(), Vec::new());
+        }
         let mut result = BinaryHeap::from(vec![(OrderedFloat(f64::INFINITY), usize::MAX); k]);
         self.query_recursive(self.root, point, &mut result);
-        result.into_iter().map(|(_, node_id)| node_id).collect()
+        let mut indices = Vec::with_capacity(k);
+        let mut distances = Vec::with_capacity(k);
+        while let Some((distance, id)) = result.pop() {
+            if id != usize::MAX {
+                indices.push(id);
+                distances.push(distance.into_inner());
+            }
+        }
+        indices.reverse();
+        distances.reverse();
+        (indices, distances)
     }
 
     fn query_recursive(
@@ -100,8 +122,8 @@ impl<const D: usize> Rindex<D> {
                     .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
                     .0;
                 if distance < current_kth.0 {
-                    neighbors.push((OrderedFloat(distance), child.slot_id));
                     neighbors.pop();
+                    neighbors.push((OrderedFloat(distance), child.slot_id));
                 }
             }
         } else {
@@ -556,12 +578,13 @@ mod tests {
         }
 
         // Query the tree for the points within the radius
-        let mut range_query_result = rindex.query(&query_point, query_radius);
+        let (mut range_query_result, _) = rindex.query(&query_point, query_radius);
         range_query_result.sort();
         assert_eq!(expected, range_query_result);
 
         // Query the tree for k nearest neighbors of the query point
-        let mut knn_query_result = rindex.query_neighbors(&query_point, range_query_result.len());
+        let (mut knn_query_result, _) =
+            rindex.query_neighbors(&query_point, range_query_result.len());
         knn_query_result.sort();
 
         // The results of the range query and the kNN query should be the same
