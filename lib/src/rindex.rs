@@ -57,7 +57,7 @@ impl<const D: usize> Rindex<D> {
     }
 
     #[must_use]
-    pub fn query(&self, point: [f64; D], radius: f64) -> Vec<usize> {
+    pub fn query(&self, point: &[f64; D], radius: f64) -> Vec<usize> {
         let mut result = Vec::new();
         let mut queue = vec![self.root];
         while let Some(node_id) = queue.pop() {
@@ -68,8 +68,7 @@ impl<const D: usize> Rindex<D> {
             }
             for &child_id in &node.children {
                 let child = &self.nodes[child_id];
-                let distance =
-                    (euclidean(&child.sphere.center, &point) - child.sphere.radius).max(0.0);
+                let distance = child.sphere.min_distance(point);
                 if distance <= radius {
                     queue.push(child_id);
                 }
@@ -95,7 +94,7 @@ impl<const D: usize> Rindex<D> {
         if node.is_leaf() {
             for child in &node.children {
                 let child = &self.nodes[*child];
-                let distance = euclidean(&child.sphere.center, point);
+                let distance = child.sphere.min_distance(point);
                 let current_kth = neighbors
                     .peek()
                     .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
@@ -111,8 +110,7 @@ impl<const D: usize> Rindex<D> {
                 .iter()
                 .map(|&child_id| {
                     let child = &self.nodes[child_id];
-                    let center_distance = euclidean(&child.sphere.center, point);
-                    let distance = (center_distance - child.sphere.radius).max(0.0);
+                    let distance = child.min_distance(point);
                     (OrderedFloat(distance), child_id)
                 })
                 .collect::<Vec<_>>();
@@ -223,8 +221,8 @@ impl<const D: usize> Rindex<D> {
     fn pop_farthest_children(&mut self, node: usize) -> Vec<usize> {
         let mut children = self.nodes[node].children.clone();
         children.sort_by_key(|child| {
-            let child_sphere = self.nodes[*child].sphere;
-            let dist = euclidean(&self.nodes[node].sphere.center, &child_sphere.center);
+            let child_sphere = &self.nodes[*child].sphere;
+            let dist = child_sphere.max_distance(&self.nodes[node].sphere.center);
             OrderedFloat(dist + child_sphere.radius)
         });
         let to_be_reinserted = children.split_off(children.len() - self.reinsert_fanout);
@@ -314,7 +312,7 @@ impl<const D: usize> Rindex<D> {
             let child = &self.nodes[*child_id].sphere;
             for (i, x) in child.center.iter().enumerate() {
                 variance[i] += (x - mean[i]).powi(2) * child.weight;
-                variance[i] += child.variance[i];
+                variance[i] += child.variance[i] * child.weight;
             }
         }
         for x in &mut variance {
@@ -328,7 +326,7 @@ impl<const D: usize> Rindex<D> {
         let mut centroid = [0.0; D];
         let mut weight = 0.0;
         for child_id in children {
-            let child = self.nodes[*child_id].sphere;
+            let child = &self.nodes[*child_id].sphere;
             for (i, x) in child.center.iter().enumerate() {
                 centroid[i] += x * child.weight;
             }
@@ -341,9 +339,9 @@ impl<const D: usize> Rindex<D> {
         // Calculate the radius
         let mut radius: f64 = 0.0;
         for child_id in children {
-            let child = &self.nodes[*child_id].sphere;
-            let distance = euclidean(&centroid, &child.center);
-            radius = radius.max(distance + child.radius);
+            let child = &self.nodes[*child_id];
+            let distance = child.max_distance(&centroid);
+            radius = radius.max(distance);
         }
 
         Sphere::new(centroid, radius, weight)
@@ -391,7 +389,7 @@ impl<const D: usize> Rindex<D> {
         let height = self.height();
         for h in (0..=height).rev() {
             for node in &self.nodes {
-                if node.height == h {
+                if node.height == h && !node.is_deleted() {
                     rows.push(node.to_string());
                 }
             }
@@ -402,7 +400,7 @@ impl<const D: usize> Rindex<D> {
 
 impl<const D: usize> Default for Rindex<D> {
     fn default() -> Self {
-        Rindex::new(6).expect("Invalid fanout")
+        Rindex::new(10).expect("Invalid fanout")
     }
 }
 
@@ -558,7 +556,7 @@ mod tests {
         }
 
         // Query the tree for the points within the radius
-        let mut range_query_result = rindex.query(query_point, query_radius);
+        let mut range_query_result = rindex.query(&query_point, query_radius);
         range_query_result.sort();
         assert_eq!(expected, range_query_result);
 

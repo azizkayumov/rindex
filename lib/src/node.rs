@@ -42,6 +42,16 @@ impl<const D: usize> Node<D> {
     }
 
     #[must_use]
+    pub fn min_distance(&self, point: &[f64; D]) -> f64 {
+        self.sphere.min_distance(point)
+    }
+
+    #[must_use]
+    pub fn max_distance(&self, point: &[f64; D]) -> f64 {
+        self.sphere.max_distance(point)
+    }
+
+    #[must_use]
     pub fn is_point(&self) -> bool {
         self.height == 0
     }

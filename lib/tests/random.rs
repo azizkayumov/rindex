@@ -44,7 +44,7 @@ fn test_random() {
         expected.sort();
 
         // Compute the actual results using the range query
-        let mut actual = rindex.query(query_point, query_radius);
+        let mut actual = rindex.query(&query_point, query_radius);
         actual.sort();
         assert_eq!(expected, actual);
 
