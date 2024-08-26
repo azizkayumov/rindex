@@ -1,3 +1,5 @@
+use core::f64;
+
 use crate::distance::euclidean;
 
 pub struct Sphere<const D: usize> {
@@ -5,6 +7,7 @@ pub struct Sphere<const D: usize> {
     pub radius: f64,
     pub weight: f64,
     pub variance: [f64; D],
+    pub bound: f64,
 }
 
 impl<const D: usize> Sphere<D> {
@@ -14,6 +17,7 @@ impl<const D: usize> Sphere<D> {
             radius,
             weight,
             variance: [0.0; D],
+            bound: f64::INFINITY,
         }
     }
 
@@ -38,6 +42,7 @@ impl<const D: usize> Default for Sphere<D> {
             radius: 0.0,
             weight: 0.0,
             variance: [0.0; D],
+            bound: f64::INFINITY,
         }
     }
 }
