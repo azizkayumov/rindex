@@ -6,17 +6,19 @@ use std::collections::{BinaryHeap, HashMap};
 
 #[test]
 fn test_reverse() {
+    let num_ops = 1000;
+    let deletion_probability = 0.2;
     let fanout = 10;
     let k = 5;
-    let mut rindex = Rindex::new(fanout, k).expect("Invalid fanout");
 
+    // Configure the random number generator and the points
     let mut rng = StdRng::seed_from_u64(0);
-    let deletion_probability = 0.2;
-
-    let num_ops = 1000;
     let mut points = Vec::new();
 
-    // Compute the expected neighbors of each point
+    // Create the rindex
+    let mut rindex = Rindex::new(fanout, k).expect("Invalid fanout");
+
+    // Create the brute force neighbors
     let mut bruteforce = BruteForceNeighbors::new(k);
 
     let mut rindex_time = 0;

@@ -429,6 +429,11 @@ impl<const D: usize> Rindex<D> {
     }
 
     #[must_use]
+    pub fn point_at(&self, slot_id: usize) -> &[f64; D] {
+        &self.nodes[slot_id].sphere.center
+    }
+
+    #[must_use]
     pub fn query_reverse(&self, point: &[f64; D]) -> (Vec<usize>, Vec<f64>) {
         if self.k == 0 || self.root == usize::MAX {
             return (Vec::new(), Vec::new());
