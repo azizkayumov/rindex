@@ -1,6 +1,6 @@
 use crate::sphere::Sphere;
 use ordered_float::OrderedFloat;
-use std::collections::BinaryHeap;
+use std::{collections::BinaryHeap, usize};
 
 pub struct Node<const D: usize> {
     pub slot_id: usize,
@@ -42,7 +42,13 @@ impl<const D: usize> Node<D> {
 
     #[must_use]
     pub fn internal(children: Vec<usize>) -> Node<D> {
-        Self::new(usize::MAX, 0, usize::MAX, Sphere::default(), children)
+        Self::new(
+            usize::MAX,
+            usize::MAX,
+            usize::MAX,
+            Sphere::default(),
+            children,
+        )
     }
 
     #[must_use]

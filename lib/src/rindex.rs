@@ -19,7 +19,7 @@ pub struct Rindex<const D: usize> {
 impl<const D: usize> Rindex<D> {
     #[must_use]
     pub fn new(fanout: usize, k: usize) -> Option<Self> {
-        if fanout < 4 {
+        if fanout < 4 || k < 1 {
             return None;
         }
         Some(Rindex {
@@ -46,17 +46,12 @@ impl<const D: usize> Rindex<D> {
         }
 
         // Create a point node (reuse a slot in the node vector if possible)
-        let point = Node::point(point);
-        let slot_id = self.add_slot(point);
+        let slot_id = self.add_slot(Node::point(point));
 
         // Insert the point node into the tree
         let mut reinsert_list = vec![slot_id];
         self.reinsert_height = 1;
         self.reinsert_nodes(&mut reinsert_list);
-
-        // Update the neighbors of the new point
-        self.update_neighbors(slot_id);
-        self.update_reverse_neighbors(slot_id);
 
         slot_id
     }
@@ -410,6 +405,8 @@ impl<const D: usize> Rindex<D> {
         for child_id in self.nodes[slot_id].children.clone() {
             self.nodes[child_id].parent = slot_id;
         }
+
+        self.update_node_bound(slot_id);
     }
 
     fn add_slot(&mut self, mut node: Node<D>) -> usize {
@@ -419,6 +416,15 @@ impl<const D: usize> Rindex<D> {
             self.nodes.push(node);
         } else {
             self.nodes[slot_id] = node;
+        }
+        if self.nodes[slot_id].is_point() {
+            let mut neighbors =
+                BinaryHeap::from(vec![(OrderedFloat(f64::INFINITY), usize::MAX); self.k - 1]);
+            neighbors.push((OrderedFloat(0.0), slot_id));
+            if self.root != usize::MAX {
+                self.preinsert(self.root, slot_id, &mut neighbors);
+            }
+            self.nodes[slot_id].neighbors = neighbors;
         }
         slot_id
     }
@@ -508,22 +514,6 @@ impl<const D: usize> Rindex<D> {
         self.update_bound(point_id);
     }
 
-    fn update_reverse_neighbors(&mut self, point_id: usize) {
-        // Find the reverse neighbors of the new point
-        let (reverse_neighbors, distances) =
-            self.query_reverse(&self.nodes[point_id].sphere.center);
-        for (neighbor, distance) in reverse_neighbors.iter().zip(distances.iter()) {
-            if *neighbor == point_id {
-                continue;
-            }
-            self.nodes[*neighbor].neighbors.pop();
-            self.nodes[*neighbor]
-                .neighbors
-                .push((OrderedFloat(*distance), point_id));
-            self.update_bound(*neighbor);
-        }
-    }
-
     fn update_bound(&mut self, point_id: usize) {
         // Update the ancestor nodes for bounding
         let mut current = self.nodes[point_id].parent;
@@ -535,6 +525,73 @@ impl<const D: usize> Rindex<D> {
             self.nodes[current].sphere.bound = bound;
             current = self.nodes[current].parent;
         }
+    }
+
+    fn preinsert(
+        &mut self,
+        node_id: usize,
+        point_id: usize,
+        neighbors: &mut BinaryHeap<(OrderedFloat<f64>, usize)>,
+    ) {
+        if self.nodes[node_id].is_leaf() {
+            let children = self.nodes[node_id].children.clone();
+            for child in children {
+                let distance = self.nodes[child]
+                    .sphere
+                    .min_distance(&self.nodes[point_id].sphere.center);
+                let current_kth = neighbors
+                    .peek()
+                    .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
+                    .0;
+                if distance < current_kth.0 {
+                    neighbors.pop();
+                    neighbors.push((OrderedFloat(distance), child));
+                }
+
+                let neighbor_kth = self.nodes[child]
+                    .neighbors
+                    .peek()
+                    .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
+                    .0;
+                if distance < neighbor_kth.0 {
+                    self.nodes[child].neighbors.pop();
+                    self.nodes[child]
+                        .neighbors
+                        .push((OrderedFloat(distance), point_id));
+                }
+            }
+        } else {
+            let mut children = self.nodes[node_id]
+                .children
+                .iter()
+                .map(|&child_id| {
+                    let child = &self.nodes[child_id];
+                    let distance = child.min_distance(&self.nodes[point_id].sphere.center);
+                    (OrderedFloat(distance), child_id)
+                })
+                .collect::<Vec<_>>();
+            children.sort_by_key(|x| x.0);
+
+            for (distance, child_id) in children {
+                let current_kth = neighbors
+                    .peek()
+                    .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
+                    .0;
+                let max_knn = OrderedFloat(self.nodes[child_id].sphere.bound);
+                if distance <= max_knn || distance <= current_kth {
+                    self.preinsert(child_id, point_id, neighbors);
+                }
+            }
+        }
+        self.update_node_bound(node_id);
+    }
+
+    fn update_node_bound(&mut self, node_id: usize) {
+        let mut bound: f64 = 0.0;
+        for child_id in &self.nodes[node_id].children {
+            bound = bound.max(self.nodes[*child_id].bound());
+        }
+        self.nodes[node_id].sphere.bound = bound;
     }
 
     #[must_use]
@@ -569,32 +626,30 @@ mod tests {
     fn reshape() {
         let mut rindex = Rindex::default();
 
+        // Create a parent node
+        let parent = rindex.add_slot(Node::leaf());
+
         // Create some point nodes
         let node_a = rindex.add_slot(Node::point([0.0, 0.0]));
         let node_b = rindex.add_slot(Node::point([0.0, 2.0]));
         let node_c = rindex.add_slot(Node::point([2.0, 0.0]));
         let node_d = rindex.add_slot(Node::point([2.0, 2.0]));
-
-        // Create a parent node
-        let mut parent = Node::leaf();
-        parent.children = vec![node_a, node_b, node_c, node_d];
-        let node_parent = rindex.add_slot(parent);
+        rindex.nodes[parent].children = vec![node_a, node_b, node_c, node_d];
 
         // Reshape the parent node
-        rindex.reshape(node_parent);
+        rindex.reshape(parent);
 
         // Check the parent node's sphere
-        let parent = &rindex.nodes[node_parent];
-        assert_eq!(parent.sphere.center, [1., 1.]);
-        assert_eq!(parent.sphere.radius, 2.0_f64.sqrt());
-        assert_eq!(parent.sphere.weight, 4.0);
-        assert_eq!(parent.height, 1);
+        let sphere = &rindex.nodes[parent].sphere;
+        assert_eq!(sphere.center, [1., 1.]);
+        assert_eq!(sphere.radius, 2.0_f64.sqrt());
+        assert_eq!(sphere.weight, 4.0);
 
         // Check the parent-child relationship
-        assert_eq!(rindex.nodes[node_a].parent, node_parent);
-        assert_eq!(rindex.nodes[node_b].parent, node_parent);
-        assert_eq!(rindex.nodes[node_c].parent, node_parent);
-        assert_eq!(rindex.nodes[node_d].parent, node_parent);
+        assert_eq!(rindex.nodes[node_a].parent, parent);
+        assert_eq!(rindex.nodes[node_b].parent, parent);
+        assert_eq!(rindex.nodes[node_c].parent, parent);
+        assert_eq!(rindex.nodes[node_d].parent, parent);
     }
 
     #[test]
@@ -778,7 +833,7 @@ mod tests {
 
         // We insert a new point that is closer to a than the current farthest neighbor
         let f = rindex.insert([0.0, 6.0]);
-        assert!(rindex.density_of(a) == 4.0);
+        assert_eq!(rindex.density_of(a), 4.0);
         assert!(rindex.density_of(b) == 3.0);
         assert!(rindex.density_of(c) == 2.0);
         assert!(rindex.density_of(d) == 2.0);

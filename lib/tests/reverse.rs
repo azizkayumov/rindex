@@ -64,9 +64,9 @@ fn test_reverse() {
                 }
                 assert!(
                     actual - expected < 1e-5,
-                    "Mismatch in rindex distances: {} vs {}",
-                    actual,
-                    expected
+                    "Mismatch in rindex distances: {:?} vs {:?}",
+                    actual_distances,
+                    expected_distances
                 );
             }
         }

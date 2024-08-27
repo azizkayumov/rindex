@@ -13,7 +13,7 @@ const DELETION_PROB: f64 = 0.2;
 const K: usize = 10;
 
 pub fn benchmark(criterion: &mut Criterion) {
-    let mut group = criterion.benchmark_group("build");
+    let mut group = criterion.benchmark_group("bench");
     group.sample_size(10);
 
     group.bench_function("rindex", |b| {
