@@ -66,9 +66,12 @@ impl<const D: usize> Rindex<D> {
 
         // Update the reverse neighbors of the deleted point
         let (reverse_neighbors, _) = self.query_reverse(&deleted_point);
-        for r in reverse_neighbors {
-            self.update_neighbors(r);
+        for r in &reverse_neighbors {
+            self.nodes[*r].neighbors =
+                BinaryHeap::from(vec![(OrderedFloat(f64::INFINITY), usize::MAX); self.k]);
         }
+        let sphere = self.calculate_sphere(&reverse_neighbors);
+        self.batch_query_recursive(self.root, &reverse_neighbors, &sphere);
     }
 
     #[must_use]
@@ -405,8 +408,6 @@ impl<const D: usize> Rindex<D> {
         for child_id in self.nodes[slot_id].children.clone() {
             self.nodes[child_id].parent = slot_id;
         }
-
-        self.update_node_bound(slot_id);
     }
 
     fn add_slot(&mut self, mut node: Node<D>) -> usize {
@@ -446,6 +447,7 @@ impl<const D: usize> Rindex<D> {
         }
         let mut neighbors = Vec::new();
         self.query_reverse_recursive(self.root, point, &mut neighbors);
+        neighbors.sort_by_key(|(_, dist)| OrderedFloat(*dist));
         let indices = neighbors.iter().map(|(id, _)| *id).collect();
         let distances = neighbors.iter().map(|(_, dist)| *dist).collect();
         (indices, distances)
@@ -483,6 +485,14 @@ impl<const D: usize> Rindex<D> {
         let mut neighbors: Vec<(OrderedFloat<f64>, usize)> =
             neighbors.iter().map(|(dist, id)| (*dist, *id)).collect();
         neighbors.sort_by_key(|(dist, _)| OrderedFloat(*dist));
+
+        // Remove the dummy neighbors with infinite distances
+        let neighbors: Vec<(OrderedFloat<f64>, usize)> = neighbors
+            .iter()
+            .filter(|(dist, _)| dist.0 != f64::INFINITY)
+            .map(|(dist, id)| (*dist, *id))
+            .collect();
+
         let indices = neighbors.iter().map(|(_, id)| *id).collect();
         let distances = neighbors.iter().map(|(dist, _)| dist.0).collect();
         (indices, distances)
@@ -496,35 +506,6 @@ impl<const D: usize> Rindex<D> {
             .unwrap_or(&(OrderedFloat(f64::INFINITY), usize::MAX))
             .0
              .0
-    }
-
-    fn update_neighbors(&mut self, point_id: usize) {
-        // Find the k nearest neighbors of the new point
-        self.nodes[point_id].neighbors =
-            BinaryHeap::from(vec![(OrderedFloat(f64::INFINITY), usize::MAX); self.k]);
-        let (neighbors, distances) =
-            self.query_neighbors(&self.nodes[point_id].sphere.center, self.k);
-
-        for (neighbor, distance) in neighbors.iter().zip(distances.iter()) {
-            self.nodes[point_id].neighbors.pop();
-            self.nodes[point_id]
-                .neighbors
-                .push((OrderedFloat(*distance), *neighbor));
-        }
-        self.update_bound(point_id);
-    }
-
-    fn update_bound(&mut self, point_id: usize) {
-        // Update the ancestor nodes for bounding
-        let mut current = self.nodes[point_id].parent;
-        while current != usize::MAX {
-            let mut bound: f64 = 0.0;
-            for child_id in &self.nodes[current].children {
-                bound = bound.max(self.nodes[*child_id].bound());
-            }
-            self.nodes[current].sphere.bound = bound;
-            current = self.nodes[current].parent;
-        }
     }
 
     fn preinsert(
@@ -592,6 +573,60 @@ impl<const D: usize> Rindex<D> {
             bound = bound.max(self.nodes[*child_id].bound());
         }
         self.nodes[node_id].sphere.bound = bound;
+    }
+
+    fn batch_query_recursive(&mut self, node: usize, points: &Vec<usize>, sphere: &Sphere<D>) {
+        if node == usize::MAX {
+            return;
+        }
+        let node = &self.nodes[node];
+        if node.is_leaf() {
+            let children = node.children.clone();
+            for point in points {
+                for child in &children {
+                    let distance =
+                        self.nodes[*child].min_distance(&self.nodes[*point].sphere.center);
+                    let current_kth = self.nodes[*point]
+                        .neighbors
+                        .peek()
+                        .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
+                        .0;
+                    if distance < current_kth.0 {
+                        self.nodes[*point].neighbors.pop();
+                        self.nodes[*point]
+                            .neighbors
+                            .push((OrderedFloat(distance), *child));
+                    }
+                }
+            }
+        } else {
+            let mut children = node
+                .children
+                .iter()
+                .map(|&child_id| {
+                    let child = &self.nodes[child_id];
+                    let distance = (child.min_distance(&sphere.center) - sphere.radius).max(0.0);
+                    (OrderedFloat(distance), child_id)
+                })
+                .collect::<Vec<_>>();
+            children.sort_by_key(|x| x.0);
+
+            for (distance, child_id) in children {
+                let mut max_current_kth = OrderedFloat(0.0);
+                for point in points {
+                    let current_kth = self.nodes[*point]
+                        .neighbors
+                        .peek()
+                        .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
+                        .0;
+                    max_current_kth = max_current_kth.max(current_kth);
+                }
+                if distance >= max_current_kth {
+                    break;
+                }
+                self.batch_query_recursive(child_id, points, sphere);
+            }
+        }
     }
 
     #[must_use]
@@ -848,5 +883,26 @@ mod tests {
         assert_eq!(rindex.knn_dist_of(d), 2.0);
         assert_eq!(rindex.knn_dist_of(e), 3.0);
         assert_eq!(rindex.knn_dist_of(f), 4.0);
+    }
+
+    #[test]
+    fn reverse_query() {
+        let fanout = 5;
+        let k = 5;
+        let mut rindex = Rindex::new(fanout, k).expect("Invalid fanout");
+
+        for i in 0..100 {
+            let _ = rindex.insert([i as f64, i as f64]);
+        }
+
+        // Query the tree in the middle of the data layout
+        let query_point = [50.0, 50.0];
+        let (_, distances) = rindex.query_reverse(&query_point);
+        assert_eq!(distances.len(), 5);
+        assert_eq!(distances[0], 0.0);
+        assert_eq!(distances[1], 2_f64.sqrt());
+        assert_eq!(distances[2], 2_f64.sqrt());
+        assert_eq!(distances[3], 8_f64.sqrt());
+        assert_eq!(distances[4], 8_f64.sqrt());
     }
 }

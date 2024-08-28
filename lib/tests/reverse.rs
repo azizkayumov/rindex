@@ -59,9 +59,6 @@ fn test_reverse() {
             let (_, expected_distances) = bruteforce.neighbors_of(*id);
 
             for (actual, expected) in actual_distances.iter().zip(expected_distances.iter()) {
-                if actual.is_infinite() && expected.is_infinite() {
-                    continue;
-                }
                 assert!(
                     actual - expected < 1e-5,
                     "Mismatch in rindex distances: {:?} vs {:?}",
@@ -163,6 +160,14 @@ impl BruteForceNeighbors {
         let mut neighbors: Vec<(OrderedFloat<f64>, usize)> =
             neighbors.iter().map(|(dist, id)| (*dist, *id)).collect();
         neighbors.sort_by_key(|(dist, _)| OrderedFloat(*dist));
+
+        // Remove the dummy neighbors with infinite distances
+        let neighbors: Vec<(OrderedFloat<f64>, usize)> = neighbors
+            .iter()
+            .filter(|(dist, _)| dist.0 != f64::INFINITY)
+            .map(|(dist, id)| (*dist, *id))
+            .collect();
+
         let indices = neighbors.iter().map(|(_, id)| *id).collect();
         let distances = neighbors.iter().map(|(dist, _)| dist.0).collect();
         (indices, distances)
