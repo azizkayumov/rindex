@@ -489,7 +489,7 @@ impl<const D: usize> Rindex<D> {
     }
 
     #[must_use]
-    pub fn density_of(&self, point_id: usize) -> f64 {
+    pub fn knn_dist_of(&self, point_id: usize) -> f64 {
         self.nodes[point_id]
             .neighbors
             .peek()
@@ -709,7 +709,7 @@ mod tests {
         // The tree should be empty
         assert_eq!(rindex.height(), 0);
 
-        // Insert 8 points to fill the root node
+        // Insert fanout points to fill the root node
         let mut point_ids = Vec::new();
         for i in 0..fanout {
             let point_id = rindex.insert([i as f64, i as f64]);
@@ -825,28 +825,28 @@ mod tests {
         let e = rindex.insert([0.0, 5.0]);
 
         // Confirms that knn distances are updated after inserting a new point
-        assert!(rindex.density_of(a) == 4.0);
-        assert!(rindex.density_of(b) == 3.0);
-        assert!(rindex.density_of(c) == 2.0);
-        assert!(rindex.density_of(d) == 3.0);
-        assert!(rindex.density_of(e) == 4.0);
+        assert_eq!(rindex.knn_dist_of(a), 4.0);
+        assert_eq!(rindex.knn_dist_of(b), 3.0);
+        assert_eq!(rindex.knn_dist_of(c), 2.0);
+        assert_eq!(rindex.knn_dist_of(d), 3.0);
+        assert_eq!(rindex.knn_dist_of(e), 4.0);
 
         // We insert a new point that is closer to a than the current farthest neighbor
         let f = rindex.insert([0.0, 6.0]);
-        assert_eq!(rindex.density_of(a), 4.0);
-        assert!(rindex.density_of(b) == 3.0);
-        assert!(rindex.density_of(c) == 2.0);
-        assert!(rindex.density_of(d) == 2.0);
-        assert!(rindex.density_of(e) == 3.0);
-        assert!(rindex.density_of(f) == 4.0);
+        assert_eq!(rindex.knn_dist_of(a), 4.0);
+        assert_eq!(rindex.knn_dist_of(b), 3.0);
+        assert_eq!(rindex.knn_dist_of(c), 2.0);
+        assert_eq!(rindex.knn_dist_of(d), 2.0);
+        assert_eq!(rindex.knn_dist_of(e), 3.0);
+        assert_eq!(rindex.knn_dist_of(f), 4.0);
 
         // Delete the point a and check the neighbors of the remaining points
         rindex.delete(a);
 
-        assert!(rindex.density_of(b) == 4.0);
-        assert!(rindex.density_of(c) == 3.0);
-        assert!(rindex.density_of(d) == 2.0);
-        assert!(rindex.density_of(e) == 3.0);
-        assert!(rindex.density_of(f) == 4.0);
+        assert_eq!(rindex.knn_dist_of(b), 4.0);
+        assert_eq!(rindex.knn_dist_of(c), 3.0);
+        assert_eq!(rindex.knn_dist_of(d), 2.0);
+        assert_eq!(rindex.knn_dist_of(e), 3.0);
+        assert_eq!(rindex.knn_dist_of(f), 4.0);
     }
 }

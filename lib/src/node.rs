@@ -1,6 +1,6 @@
 use crate::sphere::Sphere;
 use ordered_float::OrderedFloat;
-use std::{collections::BinaryHeap, usize};
+use std::collections::BinaryHeap;
 
 pub struct Node<const D: usize> {
     pub slot_id: usize,
