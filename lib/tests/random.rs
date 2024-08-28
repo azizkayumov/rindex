@@ -44,12 +44,12 @@ fn test_random() {
         expected.sort();
 
         // Compute the actual results using the range query
-        let mut actual = rindex.query(query_point, query_radius);
+        let (mut actual, _) = rindex.query(&query_point, query_radius);
         actual.sort();
         assert_eq!(expected, actual);
 
         // Compute the actual results using the k nearest neighbors query
-        let mut actual = rindex.query_neighbors(query_point, expected.len());
+        let (mut actual, _) = rindex.query_neighbors(&query_point, expected.len());
         actual.sort();
         assert_eq!(expected, actual);
     }

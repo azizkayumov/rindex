@@ -1,7 +1,11 @@
 [workspace]
 
 members = [
-    "lib",
+    "bench",
     "demo",
+    "lib",
 ]
 resolver = "2"
+
+[patch.crates-io]
+rindex = { path = "lib" }

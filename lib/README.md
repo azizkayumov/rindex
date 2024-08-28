@@ -1,3 +1,6 @@
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/azizkayumov/rindex/ci.yml?style=plastic)](#)
+[![crates.io](https://img.shields.io/crates/v/rindex)](https://crates.io/crates/rindex)
+
 # rindex
 Rindex: fully dynamic nearest neighbor search index for high-dimensional clustered datasets.
 
@@ -13,25 +16,25 @@ let b = rindex.insert([2.0, 2.0]);
 let c = rindex.insert([3.0, 3.0]);
 let d = rindex.insert([20.0, 20.0]);
 
-// Query the tree for 3 nearest neighbors of the query point
+// Query the tree for nearest neighbors of the query point
 let query_point = [0.0, 0.0];
-let result = rindex.query_neighbors(query_point, 3);
+let (indices, _distances) = rindex.query_neighbors(&query_point, 3);
 
 // The result should contain the points a, b, and c
-assert_eq!(result.len(), 3);
-assert!(result.contains(&a));
-assert!(result.contains(&b));
-assert!(result.contains(&c));
+assert_eq!(indices.len(), 3);
+assert!(indices.contains(&a));
+assert!(indices.contains(&b));
+assert!(indices.contains(&c));
 
 // Delete the point c
 rindex.delete(c);
 
 // Query the tree again (c should not be in the result)
-let result = rindex.query_neighbors(query_point, 3);
-assert_eq!(result.len(), 3);
-assert!(result.contains(&a));
-assert!(result.contains(&b));
-assert!(result.contains(&d));
+let (indices, _distances) = rindex.query_neighbors(&query_point, 3);
+assert_eq!(indices.len(), 3);
+assert!(indices.contains(&a));
+assert!(indices.contains(&b));
+assert!(indices.contains(&d));
 ```
 
 ## License

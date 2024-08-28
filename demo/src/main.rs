@@ -20,7 +20,7 @@ fn main() {
     }
 
     // Configure the tree
-    let mut tree = Rindex::new(5).expect("Invalid fanout");
+    let mut tree = Rindex::new(5, 5).expect("Invalid fanout");
     let mut point_ids = Vec::new();
     let deletion_probability = 0.25; // 25%
 

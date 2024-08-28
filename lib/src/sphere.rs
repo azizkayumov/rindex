@@ -1,8 +1,13 @@
-#[derive(Clone, Copy)]
+use core::f64;
+
+use crate::distance::euclidean;
+
 pub struct Sphere<const D: usize> {
     pub center: [f64; D],
     pub radius: f64,
     pub weight: f64,
+    pub variance: [f64; D],
+    pub bound: f64,
 }
 
 impl<const D: usize> Sphere<D> {
@@ -11,11 +16,22 @@ impl<const D: usize> Sphere<D> {
             center,
             radius,
             weight,
+            variance: [0.0; D],
+            bound: f64::INFINITY,
         }
     }
 
     pub fn point(point: [f64; D]) -> Sphere<D> {
         Self::new(point, 0.0, 1.0)
+    }
+
+    pub fn min_distance(&self, point: &[f64; D]) -> f64 {
+        let dist = euclidean(&self.center, point);
+        (dist - self.radius).max(0.0)
+    }
+
+    pub fn max_distance(&self, point: &[f64; D]) -> f64 {
+        euclidean(&self.center, point) + self.radius
     }
 }
 
@@ -25,6 +41,8 @@ impl<const D: usize> Default for Sphere<D> {
             center: [0.0; D],
             radius: 0.0,
             weight: 0.0,
+            variance: [0.0; D],
+            bound: f64::INFINITY,
         }
     }
 }

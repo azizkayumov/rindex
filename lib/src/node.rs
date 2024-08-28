@@ -1,4 +1,6 @@
 use crate::sphere::Sphere;
+use ordered_float::OrderedFloat;
+use std::collections::BinaryHeap;
 
 pub struct Node<const D: usize> {
     pub slot_id: usize,
@@ -6,6 +8,7 @@ pub struct Node<const D: usize> {
     pub parent: usize,
     pub sphere: Sphere<D>,
     pub children: Vec<usize>,
+    pub neighbors: BinaryHeap<(OrderedFloat<f64>, usize)>,
 }
 
 impl<const D: usize> Node<D> {
@@ -23,6 +26,7 @@ impl<const D: usize> Node<D> {
             parent,
             sphere,
             children,
+            neighbors: BinaryHeap::new(),
         }
     }
 
@@ -38,7 +42,36 @@ impl<const D: usize> Node<D> {
 
     #[must_use]
     pub fn internal(children: Vec<usize>) -> Node<D> {
-        Self::new(usize::MAX, 0, usize::MAX, Sphere::default(), children)
+        Self::new(
+            usize::MAX,
+            usize::MAX,
+            usize::MAX,
+            Sphere::default(),
+            children,
+        )
+    }
+
+    #[must_use]
+    pub fn min_distance(&self, point: &[f64; D]) -> f64 {
+        self.sphere.min_distance(point)
+    }
+
+    #[must_use]
+    pub fn max_distance(&self, point: &[f64; D]) -> f64 {
+        self.sphere.max_distance(point)
+    }
+
+    #[must_use]
+    pub fn bound(&self) -> f64 {
+        if self.is_point() {
+            self.neighbors
+                .peek()
+                .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
+                .0
+                 .0
+        } else {
+            self.sphere.bound
+        }
     }
 
     #[must_use]
@@ -65,7 +98,7 @@ impl<const D: usize> Node<D> {
             .collect::<Vec<String>>()
             .join("+");
         format!(
-            "{},{},{},{},{},{},{}\n",
+            "{},{},{},{},{},{},{},{}\n",
             self.slot_id,
             self.height,
             self.parent,
@@ -73,6 +106,7 @@ impl<const D: usize> Node<D> {
             self.sphere.radius,
             self.sphere.center[0],
             self.sphere.center[1],
+            self.bound(),
         )
     }
 }
@@ -81,10 +115,11 @@ impl<const D: usize> Default for Node<D> {
     fn default() -> Self {
         Node {
             slot_id: usize::MAX,
-            height: 0,
+            height: usize::MAX,
             parent: usize::MAX,
             sphere: Sphere::default(),
             children: Vec::new(),
+            neighbors: BinaryHeap::new(),
         }
     }
 }
