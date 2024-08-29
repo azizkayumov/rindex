@@ -2,7 +2,7 @@
 [![crates.io](https://img.shields.io/crates/v/rindex)](https://crates.io/crates/rindex)
 
 # rindex
-Rindex: dynamic spatial index for efficiently maintaining *k* nearest neighbors graph.
+Rindex: dynamic spatial index for efficiently maintaining *k* nearest neighbors graph of multi-dimensional clustered datasets.
 
 ## Features
 Rindex supports spatial indexing operations while also maintaining k nearest neighbor information for dynamic data:
