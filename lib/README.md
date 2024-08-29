@@ -2,7 +2,7 @@
 [![crates.io](https://img.shields.io/crates/v/rindex)](https://crates.io/crates/rindex)
 
 # rindex
-Rindex: dynamic spatial index for efficiently maintaining *k* nearest neighbor graphs.
+Rindex: dynamic spatial index for efficiently maintaining *k* nearest neighbors graph.
 
 ## Usage
 
@@ -29,8 +29,17 @@ rindex.delete(b);
 let (neighbors, distances) = rindex.neighbors_of(a);
 assert_eq!(neighbors, vec![a, c, d]); // b is not in the result
 ```
+Both insertion and deletion operations dynamically updates the *k* nearest neighbors for all remaining points (efficiently).
 
-Both insertion and deletion operations dynamically updates the *k* nearest neighbors for all remaining points (efficiently). 
+## References
+Rindex combines the algorithms presented in the following papers:
+
+[1] Beckmann, N., Kriegel, H.P., Schneider, R. and Seeger, B., 1990, May. The R*-tree: An efficient and robust access method for points and rectangles. In Proceedings of the 1990 ACM SIGMOD international conference on Management of data (pp. 322-331).
+
+[2] White, D.A. and Jain, R., 1996, February. Similarity indexing with the SS-tree. In Proceedings of the Twelfth International Conference on Data Engineering (pp. 516-523). IEEE.
+
+[3] Yang, C. and Lin, K.I., 2001, April. An index structure for efficient reverse nearest neighbor queries. In Proceedings 17th International Conference on Data Engineering (pp. 485-492). IEEE.
+
 
 ## License
 This project is licensed under the [Apache License, Version 2.0](LICENSE.md) - See the [LICENSE.md](https://github.com/azizkayumov/rindex/blob/main/LICENSE) file for details.
