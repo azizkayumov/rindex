@@ -5,12 +5,13 @@ use rindex::Rindex;
 fn test_random() {
     let mut rindex = Rindex::default();
 
-    let mut rng = StdRng::seed_from_u64(0);
-    let deletion_probability = 0.2;
-
+    // We will perform some random insertions and deletions
     let num_ops = 1000;
-    let mut points = Vec::new();
+    let deletion_probability = 0.2; // 20% chance of deletion
 
+    // Initialize the random number generator
+    let mut rng = StdRng::seed_from_u64(0);
+    let mut points = Vec::new();
     for _ in 0..num_ops {
         // Randomly insert or delete a point
         let should_delete = rng.gen_bool(deletion_probability);
