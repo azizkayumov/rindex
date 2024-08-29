@@ -5,7 +5,7 @@ use rindex::Rindex;
 use std::collections::{BinaryHeap, HashMap};
 
 #[test]
-fn test_reverse() {
+fn test_knn_graph() {
     let num_ops = 1000;
     let deletion_probability = 0.2;
     let fanout = 10;
