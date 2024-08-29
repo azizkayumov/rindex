@@ -11,8 +11,7 @@ pub struct Rindex<const D: usize> {
     reinsert_height: usize,
     k: usize,
     root: usize,
-    nodes: Vec<Node<D>>,
-    index: Index,
+    index: Index<D>,
     num_points: usize,
 }
 
@@ -36,7 +35,6 @@ impl<const D: usize> Rindex<D> {
             reinsert_height: 1,
             k,
             root: usize::MAX,
-            nodes: Vec::new(),
             index: Index::new(),
             num_points: 0,
         })
@@ -65,14 +63,14 @@ impl<const D: usize> Rindex<D> {
     pub fn delete(&mut self, point_id: usize) {
         self.num_points -= 1;
 
-        let deleted_point = self.nodes[point_id].sphere.center;
+        let deleted_point = self.index.nodes[point_id].sphere.center;
         let mut reinsert_list = self.delete_entry(point_id);
         self.reinsert_nodes(&mut reinsert_list);
 
         // Update the reverse neighbors of the deleted point
         let (reverse_neighbors, _) = self.query_reverse(&deleted_point);
         for r in &reverse_neighbors {
-            self.nodes[*r].neighbors =
+            self.index.nodes[*r].neighbors =
                 BinaryHeap::from(vec![(OrderedFloat(f64::INFINITY), usize::MAX); self.k]);
         }
         let sphere = self.calculate_sphere(&reverse_neighbors);
@@ -84,10 +82,10 @@ impl<const D: usize> Rindex<D> {
         let mut result = Vec::new();
         let mut queue = vec![self.root];
         while let Some(node_id) = queue.pop() {
-            let node = &self.nodes[node_id];
+            let node = &self.index.nodes[node_id];
             if node.is_leaf() {
                 for &child_id in &node.children {
-                    let child = &self.nodes[child_id];
+                    let child = &self.index.nodes[child_id];
                     let distance = child.sphere.min_distance(point);
                     if distance <= radius {
                         result.push((child_id, distance));
@@ -95,7 +93,7 @@ impl<const D: usize> Rindex<D> {
                 }
             } else {
                 for &child_id in &node.children {
-                    let child = &self.nodes[child_id];
+                    let child = &self.index.nodes[child_id];
                     let distance = child.sphere.min_distance(point);
                     if distance <= radius {
                         queue.push(child_id);
@@ -144,12 +142,12 @@ impl<const D: usize> Rindex<D> {
 
     #[must_use]
     pub fn point_at(&self, slot_id: usize) -> &[f64; D] {
-        &self.nodes[slot_id].sphere.center
+        &self.index.nodes[slot_id].sphere.center
     }
 
     #[must_use]
     pub fn neighbors_of(&self, point_id: usize) -> (Vec<usize>, Vec<f64>) {
-        let neighbors = &self.nodes[point_id].neighbors;
+        let neighbors = &self.index.nodes[point_id].neighbors;
         let mut neighbors: Vec<(OrderedFloat<f64>, usize)> =
             neighbors.iter().map(|(dist, id)| (*dist, *id)).collect();
         neighbors.sort_by_key(|(dist, _)| OrderedFloat(*dist));
@@ -168,7 +166,7 @@ impl<const D: usize> Rindex<D> {
 
     #[must_use]
     pub fn knn_dist_of(&self, point_id: usize) -> f64 {
-        self.nodes[point_id]
+        self.index.nodes[point_id]
             .neighbors
             .peek()
             .unwrap_or(&(OrderedFloat(f64::INFINITY), usize::MAX))
@@ -178,7 +176,10 @@ impl<const D: usize> Rindex<D> {
 
     #[must_use]
     pub fn height(&self) -> usize {
-        self.nodes.get(self.root).map_or(0, |node| node.height)
+        self.index
+            .nodes
+            .get(self.root)
+            .map_or(0, |node| node.height)
     }
 
     #[must_use]
@@ -186,7 +187,7 @@ impl<const D: usize> Rindex<D> {
         let mut rows = Vec::new();
         let height = self.height();
         for h in (0..=height).rev() {
-            for node in &self.nodes {
+            for node in &self.index.nodes {
                 if node.height == h && !node.is_deleted() {
                     rows.push(node.to_string());
                 }
@@ -211,13 +212,14 @@ impl<const D: usize> Rindex<D> {
     // Insert a node into the tree
     // Split the node if it has too many children
     fn insert_entry(&mut self, node: usize, entry: usize) -> Vec<usize> {
-        if self.nodes[node].height == self.nodes[entry].height + 1 {
-            self.nodes[node].children.push(entry);
+        if self.index.nodes[node].height == self.index.nodes[entry].height + 1 {
+            self.index.nodes[node].children.push(entry);
             self.reshape(node);
 
             let mut to_be_reinserted = Vec::new();
-            if self.nodes[node].children.len() > self.max_fanout && node != self.root {
-                if self.reinsert_height == self.nodes[node].height && self.reinsert_fanout > 0 {
+            if self.index.nodes[node].children.len() > self.max_fanout && node != self.root {
+                if self.reinsert_height == self.index.nodes[node].height && self.reinsert_fanout > 0
+                {
                     to_be_reinserted.extend(self.pop_farthest_children(node));
                 } else {
                     to_be_reinserted.push(self.split(node));
@@ -233,17 +235,17 @@ impl<const D: usize> Rindex<D> {
     }
 
     fn delete_entry(&mut self, entry: usize) -> Vec<usize> {
-        let mut current = self.nodes[entry].parent;
-        self.nodes[current].children.retain(|&x| x != entry);
+        let mut current = self.index.nodes[entry].parent;
+        self.index.nodes[current].children.retain(|&x| x != entry);
         self.delete_slot(entry);
 
         let mut reinsert_list = Vec::new();
         while current != usize::MAX {
             self.reshape(current);
-            let parent = self.nodes[current].parent;
-            if current != self.root && self.nodes[current].children.len() < self.min_fanout {
-                self.nodes[parent].children.retain(|&x| x != current);
-                reinsert_list.extend(self.nodes[current].children.clone());
+            let parent = self.index.nodes[current].parent;
+            if current != self.root && self.index.nodes[current].children.len() < self.min_fanout {
+                self.index.nodes[parent].children.retain(|&x| x != current);
+                reinsert_list.extend(self.index.nodes[current].children.clone());
                 self.delete_slot(current);
             }
             current = parent;
@@ -253,17 +255,19 @@ impl<const D: usize> Rindex<D> {
 
     fn adjust_tree(&mut self) {
         self.reshape(self.root);
-        if self.nodes[self.root].children.len() > self.max_fanout {
+        if self.index.nodes[self.root].children.len() > self.max_fanout {
             let sibling = self.split(self.root);
             let new_root = Node::internal(vec![self.root, sibling]);
             self.root = self.add_slot(new_root);
             self.reshape(self.root);
-        } else if self.nodes[self.root].height > 1 && self.nodes[self.root].children.len() == 1 {
-            let new_root = self.nodes[self.root].children[0];
+        } else if self.index.nodes[self.root].height > 1
+            && self.index.nodes[self.root].children.len() == 1
+        {
+            let new_root = self.index.nodes[self.root].children[0];
             self.delete_slot(self.root);
             self.root = new_root;
-            self.nodes[self.root].parent = usize::MAX;
-        } else if self.nodes[self.root].children.is_empty() {
+            self.index.nodes[self.root].parent = usize::MAX;
+        } else if self.index.nodes[self.root].children.is_empty() {
             self.delete_slot(self.root);
             self.root = usize::MAX;
         }
@@ -272,9 +276,9 @@ impl<const D: usize> Rindex<D> {
     fn choose_subtree(&self, node: usize, entry: usize) -> usize {
         let mut best_distance = f64::INFINITY;
         let mut best_child = usize::MAX;
-        for &child_id in &self.nodes[node].children {
-            let child = &self.nodes[child_id];
-            let distance = euclidean(&child.sphere.center, &self.nodes[entry].sphere.center);
+        for &child_id in &self.index.nodes[node].children {
+            let child = &self.index.nodes[child_id];
+            let distance = euclidean(&child.sphere.center, &self.index.nodes[entry].sphere.center);
             if distance < best_distance {
                 best_distance = distance;
                 best_child = child_id;
@@ -286,52 +290,48 @@ impl<const D: usize> Rindex<D> {
     #[allow(clippy::similar_names)]
     fn reshape(&mut self, slot_id: usize) {
         // Calculate the sphere
-        let mut sphere = self.calculate_sphere(&self.nodes[slot_id].children);
+        let mut sphere = self.calculate_sphere(&self.index.nodes[slot_id].children);
         sphere.variance = self.calculate_variance(slot_id);
-        self.nodes[slot_id].sphere = sphere;
+        self.index.nodes[slot_id].sphere = sphere;
 
         // Calculate the height
-        self.nodes[slot_id].height = self.nodes[slot_id]
+        self.index.nodes[slot_id].height = self.index.nodes[slot_id]
             .children
             .iter()
-            .fold(0, |max, child_id| max.max(self.nodes[*child_id].height))
+            .fold(0, |max, child_id| {
+                max.max(self.index.nodes[*child_id].height)
+            })
             + 1;
 
         // Update parent of the children
-        for child_id in self.nodes[slot_id].children.clone() {
-            self.nodes[child_id].parent = slot_id;
+        for child_id in self.index.nodes[slot_id].children.clone() {
+            self.index.nodes[child_id].parent = slot_id;
         }
     }
 
-    fn add_slot(&mut self, mut node: Node<D>) -> usize {
-        let slot_id = self.index.insert();
-        node.slot_id = slot_id;
-        if slot_id == self.nodes.len() {
-            self.nodes.push(node);
-        } else {
-            self.nodes[slot_id] = node;
-        }
-        if self.nodes[slot_id].is_point() {
+    fn add_slot(&mut self, node: Node<D>) -> usize {
+        let slot_id = self.index.insert(node);
+        if self.index.nodes[slot_id].is_point() {
             let mut neighbors =
                 BinaryHeap::from(vec![(OrderedFloat(f64::INFINITY), usize::MAX); self.k - 1]);
             neighbors.push((OrderedFloat(0.0), slot_id));
             self.preinsert(self.root, slot_id, &mut neighbors);
-            self.nodes[slot_id].neighbors = neighbors;
+            self.index.nodes[slot_id].neighbors = neighbors;
         }
         slot_id
     }
 
     fn delete_slot(&mut self, slot_id: usize) {
         self.index.delete(slot_id);
-        self.nodes[slot_id] = Node::default();
+        self.index.nodes[slot_id] = Node::default();
     }
 
     fn update_node_bound(&mut self, node_id: usize) {
         let mut bound: f64 = 0.0;
-        for child_id in &self.nodes[node_id].children {
-            bound = bound.max(self.nodes[*child_id].bound());
+        for child_id in &self.index.nodes[node_id].children {
+            bound = bound.max(self.index.nodes[*child_id].bound());
         }
-        self.nodes[node_id].sphere.bound = bound;
+        self.index.nodes[node_id].sphere.bound = bound;
     }
 
     fn preinsert(
@@ -343,12 +343,12 @@ impl<const D: usize> Rindex<D> {
         if node_id == usize::MAX {
             return;
         }
-        if self.nodes[node_id].is_leaf() {
-            let children = self.nodes[node_id].children.clone();
+        if self.index.nodes[node_id].is_leaf() {
+            let children = self.index.nodes[node_id].children.clone();
             for child in children {
-                let distance = self.nodes[child]
+                let distance = self.index.nodes[child]
                     .sphere
-                    .min_distance(&self.nodes[point_id].sphere.center);
+                    .min_distance(&self.index.nodes[point_id].sphere.center);
                 let current_kth = neighbors
                     .peek()
                     .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
@@ -358,25 +358,25 @@ impl<const D: usize> Rindex<D> {
                     neighbors.push((OrderedFloat(distance), child));
                 }
 
-                let neighbor_kth = self.nodes[child]
+                let neighbor_kth = self.index.nodes[child]
                     .neighbors
                     .peek()
                     .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
                     .0;
                 if distance < neighbor_kth.0 {
-                    self.nodes[child].neighbors.pop();
-                    self.nodes[child]
+                    self.index.nodes[child].neighbors.pop();
+                    self.index.nodes[child]
                         .neighbors
                         .push((OrderedFloat(distance), point_id));
                 }
             }
         } else {
-            let mut children = self.nodes[node_id]
+            let mut children = self.index.nodes[node_id]
                 .children
                 .iter()
                 .map(|&child_id| {
-                    let child = &self.nodes[child_id];
-                    let distance = child.min_distance(&self.nodes[point_id].sphere.center);
+                    let child = &self.index.nodes[child_id];
+                    let distance = child.min_distance(&self.index.nodes[point_id].sphere.center);
                     (OrderedFloat(distance), child_id)
                 })
                 .collect::<Vec<_>>();
@@ -387,7 +387,7 @@ impl<const D: usize> Rindex<D> {
                     .peek()
                     .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
                     .0;
-                let max_knn = OrderedFloat(self.nodes[child_id].sphere.bound);
+                let max_knn = OrderedFloat(self.index.nodes[child_id].sphere.bound);
                 if distance <= max_knn || distance <= current_kth {
                     self.preinsert(child_id, point_id, neighbors);
                 }
@@ -400,21 +400,21 @@ impl<const D: usize> Rindex<D> {
         if node_id == usize::MAX {
             return;
         }
-        let node = &self.nodes[node_id];
+        let node = &self.index.nodes[node_id];
         if node.is_leaf() {
             let children = node.children.clone();
             for point in points {
                 for child in &children {
-                    let distance =
-                        self.nodes[*child].min_distance(&self.nodes[*point].sphere.center);
-                    let current_kth = self.nodes[*point]
+                    let distance = self.index.nodes[*child]
+                        .min_distance(&self.index.nodes[*point].sphere.center);
+                    let current_kth = self.index.nodes[*point]
                         .neighbors
                         .peek()
                         .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
                         .0;
                     if distance < current_kth.0 {
-                        self.nodes[*point].neighbors.pop();
-                        self.nodes[*point]
+                        self.index.nodes[*point].neighbors.pop();
+                        self.index.nodes[*point]
                             .neighbors
                             .push((OrderedFloat(distance), *child));
                     }
@@ -425,7 +425,7 @@ impl<const D: usize> Rindex<D> {
                 .children
                 .iter()
                 .map(|&child_id| {
-                    let child = &self.nodes[child_id];
+                    let child = &self.index.nodes[child_id];
                     let distance = (child.min_distance(&sphere.center) - sphere.radius).max(0.0);
                     (OrderedFloat(distance), child_id)
                 })
@@ -435,7 +435,7 @@ impl<const D: usize> Rindex<D> {
             for (distance, child_id) in children {
                 let mut max_current_kth = OrderedFloat(0.0);
                 for point in points {
-                    let current_kth = self.nodes[*point]
+                    let current_kth = self.index.nodes[*point]
                         .neighbors
                         .peek()
                         .unwrap_or(&(OrderedFloat(f64::INFINITY), 0))
@@ -458,14 +458,14 @@ impl<const D: usize> Rindex<D> {
 // - split_dimension: Find the dimension with the maximum variance
 impl<const D: usize> Rindex<D> {
     fn pop_farthest_children(&mut self, node: usize) -> Vec<usize> {
-        let mut children = self.nodes[node].children.clone();
+        let mut children = self.index.nodes[node].children.clone();
         children.sort_by_key(|child| {
-            let child_sphere = &self.nodes[*child].sphere;
-            let dist = child_sphere.max_distance(&self.nodes[node].sphere.center);
+            let child_sphere = &self.index.nodes[*child].sphere;
+            let dist = child_sphere.max_distance(&self.index.nodes[node].sphere.center);
             OrderedFloat(dist + child_sphere.radius)
         });
         let to_be_reinserted = children.split_off(children.len() - self.reinsert_fanout);
-        self.nodes[node].children = children;
+        self.index.nodes[node].children = children;
         self.reshape(node);
         to_be_reinserted
     }
@@ -475,10 +475,10 @@ impl<const D: usize> Rindex<D> {
         let split_dimension = self.split_dimension(slot_id);
 
         // Sort the children along the split dimension
-        let mut left = self.nodes[slot_id].children.clone();
+        let mut left = self.index.nodes[slot_id].children.clone();
         left.sort_by(|a, b| {
-            let a = &self.nodes[*a].sphere.center[split_dimension];
-            let b = &self.nodes[*b].sphere.center[split_dimension];
+            let a = &self.index.nodes[*a].sphere.center[split_dimension];
+            let b = &self.index.nodes[*b].sphere.center[split_dimension];
             a.partial_cmp(b).unwrap()
         });
 
@@ -492,15 +492,21 @@ impl<const D: usize> Rindex<D> {
 
         let left_sphere = self.calculate_sphere(&left);
         let right_sphere = self.calculate_sphere(&right);
-        let left_dist = euclidean(&left_sphere.center, &self.nodes[slot_id].sphere.center);
-        let right_dist = euclidean(&right_sphere.center, &self.nodes[slot_id].sphere.center);
+        let left_dist = euclidean(
+            &left_sphere.center,
+            &self.index.nodes[slot_id].sphere.center,
+        );
+        let right_dist = euclidean(
+            &right_sphere.center,
+            &self.index.nodes[slot_id].sphere.center,
+        );
 
         if right_dist < left_dist {
             std::mem::swap(&mut left, &mut right);
         }
 
         // Create two new nodes
-        self.nodes[slot_id].children = left;
+        self.index.nodes[slot_id].children = left;
         self.reshape(slot_id);
 
         let sibling = Node::internal(right);
@@ -510,17 +516,17 @@ impl<const D: usize> Rindex<D> {
         // Reinsert the remaining children
         while let Some(entry) = remaining.pop() {
             let node_dist = euclidean(
-                &self.nodes[entry].sphere.center,
-                &self.nodes[slot_id].sphere.center,
+                &self.index.nodes[entry].sphere.center,
+                &self.index.nodes[slot_id].sphere.center,
             );
             let sibling_dist = euclidean(
-                &self.nodes[entry].sphere.center,
-                &self.nodes[sibling].sphere.center,
+                &self.index.nodes[entry].sphere.center,
+                &self.index.nodes[sibling].sphere.center,
             );
             if node_dist < sibling_dist {
-                self.nodes[slot_id].children.push(entry);
+                self.index.nodes[slot_id].children.push(entry);
             } else {
-                self.nodes[sibling].children.push(entry);
+                self.index.nodes[sibling].children.push(entry);
             }
         }
 
@@ -544,11 +550,11 @@ impl<const D: usize> Rindex<D> {
     }
 
     fn calculate_variance(&self, slot_id: usize) -> [f64; D] {
-        let node = &self.nodes[slot_id];
+        let node = &self.index.nodes[slot_id];
         let mean = &node.sphere.center;
         let mut variance = [0.0; D];
         for child_id in &node.children {
-            let child = &self.nodes[*child_id].sphere;
+            let child = &self.index.nodes[*child_id].sphere;
             for (i, x) in child.center.iter().enumerate() {
                 variance[i] += (x - mean[i]).powi(2) * child.weight;
                 variance[i] += child.variance[i] * child.weight;
@@ -565,7 +571,7 @@ impl<const D: usize> Rindex<D> {
         let mut centroid = [0.0; D];
         let mut weight = 0.0;
         for child_id in children {
-            let child = &self.nodes[*child_id].sphere;
+            let child = &self.index.nodes[*child_id].sphere;
             for (i, x) in child.center.iter().enumerate() {
                 centroid[i] += x * child.weight;
             }
@@ -579,7 +585,7 @@ impl<const D: usize> Rindex<D> {
         let mut radius: f64 = 0.0;
         let mut bound: f64 = 0.0;
         for child_id in children {
-            let child = &self.nodes[*child_id];
+            let child = &self.index.nodes[*child_id];
             let distance = child.max_distance(&centroid);
             radius = radius.max(distance);
             bound = bound.max(child.bound());
@@ -598,10 +604,10 @@ impl<const D: usize> Rindex<D> {
         point: &[f64; D],
         neighbors: &mut BinaryHeap<(OrderedFloat<f64>, usize)>,
     ) {
-        let node = &self.nodes[node];
+        let node = &self.index.nodes[node];
         if node.is_leaf() {
             for child in &node.children {
-                let child = &self.nodes[*child];
+                let child = &self.index.nodes[*child];
                 let distance = child.sphere.min_distance(point);
                 let current_kth = neighbors
                     .peek()
@@ -617,7 +623,7 @@ impl<const D: usize> Rindex<D> {
                 .children
                 .iter()
                 .map(|&child_id| {
-                    let child = &self.nodes[child_id];
+                    let child = &self.index.nodes[child_id];
                     let distance = child.min_distance(point);
                     (OrderedFloat(distance), child_id)
                 })
@@ -643,10 +649,10 @@ impl<const D: usize> Rindex<D> {
         point: &[f64; D],
         reverse_neighbors: &mut Vec<(usize, f64)>,
     ) {
-        let node = &self.nodes[node];
+        let node = &self.index.nodes[node];
         if node.is_leaf() {
             for child in &node.children {
-                let child = &self.nodes[*child];
+                let child = &self.index.nodes[*child];
                 let distance = child.sphere.min_distance(point);
                 if distance <= child.bound() {
                     reverse_neighbors.push((child.slot_id, distance));
@@ -654,8 +660,8 @@ impl<const D: usize> Rindex<D> {
             }
         } else {
             for child in &node.children {
-                let distance = self.nodes[*child].min_distance(point);
-                if distance > self.nodes[*child].bound() {
+                let distance = self.index.nodes[*child].min_distance(point);
+                if distance > self.index.nodes[*child].bound() {
                     continue;
                 }
                 self.query_reverse_recursive(*child, point, reverse_neighbors);
@@ -683,22 +689,22 @@ mod tests {
         let node_b = rindex.add_slot(Node::point([0.0, 2.0]));
         let node_c = rindex.add_slot(Node::point([2.0, 0.0]));
         let node_d = rindex.add_slot(Node::point([2.0, 2.0]));
-        rindex.nodes[parent].children = vec![node_a, node_b, node_c, node_d];
+        rindex.index.nodes[parent].children = vec![node_a, node_b, node_c, node_d];
 
         // Reshape the parent node
         rindex.reshape(parent);
 
         // Check the parent node's sphere
-        let sphere = &rindex.nodes[parent].sphere;
+        let sphere = &rindex.index.nodes[parent].sphere;
         assert_eq!(sphere.center, [1., 1.]);
         assert_eq!(sphere.radius, 2.0_f64.sqrt());
         assert_eq!(sphere.weight, 4.0);
 
         // Check the parent-child relationship
-        assert_eq!(rindex.nodes[node_a].parent, parent);
-        assert_eq!(rindex.nodes[node_b].parent, parent);
-        assert_eq!(rindex.nodes[node_c].parent, parent);
-        assert_eq!(rindex.nodes[node_d].parent, parent);
+        assert_eq!(rindex.index.nodes[node_a].parent, parent);
+        assert_eq!(rindex.index.nodes[node_b].parent, parent);
+        assert_eq!(rindex.index.nodes[node_c].parent, parent);
+        assert_eq!(rindex.index.nodes[node_d].parent, parent);
     }
 
     #[test]
@@ -734,13 +740,13 @@ mod tests {
         let sibling = rindex.split(node);
 
         // Check the node's sphere
-        let node = &rindex.nodes[node];
+        let node = &rindex.index.nodes[node];
         assert_eq!(node.sphere.center, [1., 1.]);
         assert_eq!(node.sphere.radius, 2.0_f64.sqrt());
         assert_eq!(node.sphere.weight, 5.0);
 
         // Check the sibling's sphere
-        let sibling = &rindex.nodes[sibling];
+        let sibling = &rindex.index.nodes[sibling];
         assert_eq!(sibling.sphere.center, [10.5, 1.5]);
         assert_eq!(
             sibling.sphere.radius,
@@ -812,7 +818,7 @@ mod tests {
             }
 
             // Check the fanout constraints after each operation
-            for node in &rindex.nodes {
+            for node in &rindex.index.nodes {
                 if !node.is_point() && node.slot_id != rindex.root && !node.is_deleted() {
                     assert!(node.children.len() >= rindex.min_fanout);
                     assert!(node.children.len() <= rindex.max_fanout);
@@ -878,7 +884,7 @@ mod tests {
         // Find the expected points within the radius
         let mut expected = Vec::new();
         for p in point_ids {
-            let point = rindex.nodes[p].sphere.center;
+            let point = rindex.index.nodes[p].sphere.center;
             let distance = euclidean(&point, &query_point);
             if distance <= query_radius {
                 expected.push(p);
