@@ -4,6 +4,8 @@ use std::{collections::BinaryHeap, vec};
 use crate::{distance::euclidean, index::Index, node::Node, sphere::Sphere};
 use ordered_float::OrderedFloat;
 
+/// Rindex: dynamic spatial index for efficiently maintaining *k* nearest neighbors graph of multi-dimensional clustered datasets.
+///
 /// # Examples
 ///
 /// ```
@@ -43,27 +45,60 @@ pub struct Rindex<const D: usize> {
 
 impl<const D: usize> Default for Rindex<D> {
     fn default() -> Self {
-        Rindex::new(10, 10).expect("Invalid fanout")
+        Rindex::new(10, 1).expect("Invalid fanout")
     }
 }
 
 // Public methods
 impl<const D: usize> Rindex<D> {
     #[must_use]
-    pub fn new(fanout: usize, k: usize) -> Option<Self> {
-        if fanout < 4 || k < 1 {
+    pub fn new_with_params(
+        min_fanout: usize,
+        max_fanout: usize,
+        reinsert_fanout: usize,
+        k: usize,
+    ) -> Option<Self> {
+        if max_fanout < 4
+            || min_fanout < 2
+            || max_fanout < min_fanout * 2
+            || max_fanout < reinsert_fanout * 2
+            || k < 1
+        {
             return None;
         }
         Some(Rindex {
-            min_fanout: fanout / 2,
-            max_fanout: fanout,
-            reinsert_fanout: fanout / 3,
+            min_fanout,
+            max_fanout,
+            reinsert_fanout,
             reinsert_height: 1,
             k,
             root: usize::MAX,
             index: Index::new(),
             num_points: 0,
         })
+    }
+
+    #[must_use]
+    pub fn new(max_fanout: usize, k: usize) -> Option<Self> {
+        Rindex::new_with_params(max_fanout / 2, max_fanout, max_fanout / 3, k)
+    }
+
+    #[allow(clippy::missing_panics_doc)]
+    #[must_use]
+    pub fn with_small_fanout(k: usize) -> Self {
+        Rindex::new(6, k).expect("Invalid fanout")
+    }
+
+    #[allow(clippy::missing_panics_doc)]
+    #[must_use]
+    pub fn with_medium_fanout(k: usize) -> Self {
+        Rindex::new(10, k).expect("Invalid fanout")
+    }
+
+    #[allow(clippy::missing_panics_doc)]
+    #[must_use]
+    pub fn with_large_fanout(k: usize) -> Self {
+        Rindex::new(20, k).expect("Invalid fanout")
     }
 
     /// # Examples
