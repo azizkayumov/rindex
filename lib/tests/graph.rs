@@ -8,7 +8,6 @@ use std::collections::{BinaryHeap, HashMap};
 fn test_knn_graph() {
     let num_ops = 1000;
     let deletion_probability = 0.2;
-    let fanout = 10;
     let k = 5;
 
     // Configure the random number generator and the points
@@ -16,7 +15,7 @@ fn test_knn_graph() {
     let mut points = Vec::new();
 
     // Create the rindex
-    let mut rindex = Rindex::new(fanout, k).expect("Invalid fanout");
+    let mut rindex = Rindex::new(k);
 
     // Create the brute force neighbors
     let mut bruteforce = BruteForceNeighbors::new(k);

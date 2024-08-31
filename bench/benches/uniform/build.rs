@@ -24,7 +24,7 @@ pub fn benchmark(criterion: &mut Criterion) {
 
 pub fn build_rindex() -> (Rindex<D>, Vec<(usize, [f64; D])>) {
     let mut rng = StdRng::seed_from_u64(0);
-    let mut index = Rindex::new(10, K).expect("Failed to create Rindex");
+    let mut index = Rindex::new(K);
     let mut points = Vec::new();
     for _ in 0..NUM_OPERATIONS {
         let should_delete = rng.gen_bool(DELETION_PROB);
