@@ -3,6 +3,7 @@ use rindex::Rindex;
 
 #[test]
 fn test_random() {
+    // Create a new Rindex
     let mut rindex = Rindex::default();
 
     // We will perform some random insertions and deletions

@@ -4,14 +4,15 @@ use std::{collections::BinaryHeap, vec};
 use crate::{distance::euclidean, index::Index, node::Node, sphere::Sphere};
 use ordered_float::OrderedFloat;
 
+/// Rindex: dynamic spatial index for efficiently maintaining *k* nearest neighbors graph of multi-dimensional clustered datasets.
+///
 /// # Examples
 ///
 /// ```
 /// use rindex::Rindex;
 ///
-/// let fanout = 10;
 /// let k = 3;
-/// let mut rindex = Rindex::new(fanout, k).expect("Failed to create Rindex");
+/// let mut rindex = Rindex::new(k);
 ///
 /// // Insert some points
 /// let a = rindex.insert([1.0, 1.0]);
@@ -43,27 +44,41 @@ pub struct Rindex<const D: usize> {
 
 impl<const D: usize> Default for Rindex<D> {
     fn default() -> Self {
-        Rindex::new(10, 10).expect("Invalid fanout")
+        Rindex::new(10)
     }
 }
 
 // Public methods
 impl<const D: usize> Rindex<D> {
     #[must_use]
-    pub fn new(fanout: usize, k: usize) -> Option<Self> {
-        if fanout < 4 || k < 1 {
+    pub fn new_with_params(max_fanout: usize, k: usize) -> Option<Self> {
+        if max_fanout < 4 || k < 1 {
             return None;
         }
         Some(Rindex {
-            min_fanout: fanout / 2,
-            max_fanout: fanout,
-            reinsert_fanout: fanout / 3,
+            min_fanout: max_fanout / 2,
+            max_fanout,
+            reinsert_fanout: max_fanout / 3,
             reinsert_height: 1,
             k,
             root: usize::MAX,
             index: Index::new(),
             num_points: 0,
         })
+    }
+
+    #[must_use]
+    pub fn new(k: usize) -> Self {
+        Rindex {
+            min_fanout: 5,
+            max_fanout: 10,
+            reinsert_fanout: 3,
+            reinsert_height: 1,
+            k,
+            root: usize::MAX,
+            index: Index::new(),
+            num_points: 0,
+        }
     }
 
     /// # Examples
@@ -202,9 +217,8 @@ impl<const D: usize> Rindex<D> {
     /// ```
     /// use rindex::Rindex;
     ///
-    /// let fanout = 10;
     /// let k = 3;
-    /// let mut rindex = Rindex::new(fanout, k).expect("Failed to create Rindex");
+    /// let mut rindex = Rindex::new(k);
     /// let a = rindex.insert([1.0, 1.0]);
     /// let b = rindex.insert([2.0, 2.0]);
     /// let c = rindex.insert([3.0, 3.0]);
@@ -242,9 +256,8 @@ impl<const D: usize> Rindex<D> {
     /// ```
     /// use rindex::Rindex;
     ///
-    /// let fanout = 10;
     /// let k = 3;
-    /// let mut rindex = Rindex::new(fanout, k).expect("Failed to create Rindex");
+    /// let mut rindex = Rindex::new(k);
     ///
     /// // Insert some points
     /// let a = rindex.insert([1.0, 1.0]);
@@ -278,9 +291,8 @@ impl<const D: usize> Rindex<D> {
     /// ```
     /// use rindex::Rindex;
     ///
-    /// let fanout = 10;
     /// let k = 3;
-    /// let mut rindex = Rindex::new(fanout, k).expect("Failed to create Rindex");
+    /// let mut rindex = Rindex::new(k);
     ///
     /// // Insert some points
     /// let a = rindex.insert([1.0, 1.0]);
@@ -306,7 +318,7 @@ impl<const D: usize> Rindex<D> {
     ///
     /// let fanout = 4;
     /// let k = 3;
-    /// let mut rindex = Rindex::new(fanout, k).expect("Failed to create Rindex");
+    /// let mut rindex = Rindex::new_with_params(fanout, k).expect("Failed to create Rindex");
     ///
     /// // Insert some points
     /// let a = rindex.insert([1.0, 1.0]);
@@ -862,7 +874,7 @@ mod tests {
     fn split() {
         let fanout = 8;
         let k = 10;
-        let mut rindex = Rindex::new(fanout, k).expect("Invalid fanout");
+        let mut rindex = Rindex::new_with_params(fanout, k).expect("Invalid fanout");
 
         // Create 9 point nodes, as the fanout of 8 will trigger a split
         let node_a = rindex.add_slot(Node::point([0.0, 0.0]));
@@ -910,7 +922,7 @@ mod tests {
     fn update() {
         let fanout = 8;
         let k = 10;
-        let mut rindex = Rindex::new(fanout, k).expect("Invalid fanout");
+        let mut rindex = Rindex::new_with_params(fanout, k).expect("Invalid fanout");
 
         // The tree should be empty
         assert_eq!(rindex.height(), 0);
@@ -982,7 +994,7 @@ mod tests {
     fn knn_distances() {
         let fanout = 5;
         let k = 5;
-        let mut rindex = Rindex::new(fanout, k).expect("Invalid fanout");
+        let mut rindex = Rindex::new_with_params(fanout, k).expect("Invalid fanout");
 
         // Insert some points
         let a = rindex.insert([0.0, 1.0]);
@@ -1058,9 +1070,8 @@ mod tests {
 
     #[test]
     fn reverse_query() {
-        let fanout = 5;
         let k = 5;
-        let mut rindex = Rindex::new(fanout, k).expect("Invalid fanout");
+        let mut rindex = Rindex::new(k);
 
         for i in 0..100 {
             let _ = rindex.insert([i as f64, i as f64]);

@@ -11,9 +11,8 @@ The following example shows how to maintain *k* nearest neighbors using Rindex:
 use rindex::Rindex;
 
 fn main() {
-    let fanout = 10;
     let k = 3; // maintain 3 nearest neighbors for each point
-    let mut rindex = Rindex::new(fanout, k).expect("Failed to create Rindex");
+    let mut rindex = Rindex::new(k);
 
     // Insert some points
     let a = rindex.insert([1.0, 1.0]);
@@ -62,9 +61,8 @@ The traditional query operations are supported in addition to the reverse neares
 use rindex::Rindex;
 
 fn main() {
-    let fanout = 10;
     let k = 3;
-    let mut rindex = Rindex::new(fanout, k).expect("Failed to create Rindex");
+    let mut rindex = Rindex::new(k);
     let a = rindex.insert([1.0, 1.0]);
     let b = rindex.insert([2.0, 2.0]);
     let c = rindex.insert([3.0, 3.0]);
