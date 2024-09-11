@@ -1,6 +1,6 @@
 [package]
 name = "rindex"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 rust-version = "1.63"
 description = "Rindex: dynamic spatial index for efficiently maintaining *k* nearest neighbors graph of multi-dimensional clustered datasets."
