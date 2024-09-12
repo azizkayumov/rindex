@@ -358,6 +358,26 @@ impl<const D: usize> Rindex<D> {
         }
         rows
     }
+
+    #[must_use]
+    pub fn children_of(&self, node_id: usize) -> &[usize] {
+        &self.index.nodes[node_id].children
+    }
+
+    #[must_use]
+    pub fn is_leaf(&self, node_id: usize) -> bool {
+        self.index.nodes[node_id].is_leaf()
+    }
+
+    #[must_use]
+    pub fn is_point(&self, node_id: usize) -> bool {
+        self.index.nodes[node_id].is_point()
+    }
+
+    #[must_use]
+    pub fn is_deleted(&self, node_id: usize) -> bool {
+        self.index.nodes[node_id].is_deleted()
+    }
 }
 
 // Update algorithms
